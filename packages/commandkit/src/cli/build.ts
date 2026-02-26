@@ -149,7 +149,7 @@ export async function buildApplication({
             ]),
           ),
           outputOptions: {
-            sanitizeFileName: (name) => name,
+            sanitizeFileName: (name) => name.replace(/\0/g, ''),
           },
           unbundle: isDev
             ? true
