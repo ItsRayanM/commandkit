@@ -1,7 +1,9 @@
-// Leaky bucket rate limiting.
-//
-// Drains at a steady rate to smooth spikes in traffic.
-// The stored level keeps limits consistent across commands.
+﻿/**
+ * Leaky bucket rate limiting.
+ *
+ * Drains at a steady rate to smooth spikes in traffic.
+ * The stored level keeps limits consistent across commands.
+ */
 
 import type {
   RateLimitAlgorithm,
@@ -26,10 +28,18 @@ interface LeakyBucketState {
 
 /**
  * Leaky bucket algorithm for smoothing output to a steady rate.
+ *
+ * @implements RateLimitAlgorithm
  */
 export class LeakyBucketAlgorithm implements RateLimitAlgorithm {
   public readonly type: RateLimitAlgorithmType = 'leaky-bucket';
 
+  /**
+   * Create a leaky-bucket algorithm bound to a storage backend.
+   *
+   * @param storage - Storage backend for rate-limit state.
+   * @param config - Leaky-bucket configuration.
+   */
   public constructor(
     private readonly storage: RateLimitStorage,
     private readonly config: LeakyBucketConfig,
@@ -37,6 +47,10 @@ export class LeakyBucketAlgorithm implements RateLimitAlgorithm {
 
   /**
    * Record one attempt and return the current bucket status for this key.
+   *
+   * @param key - Storage key for the limiter.
+   * @returns Rate limit result for the current bucket.
+   * @throws Error when leakRate is non-positive.
    */
   public async consume(key: string): Promise<RateLimitResult> {
     const now = Date.now();
@@ -102,11 +116,23 @@ export class LeakyBucketAlgorithm implements RateLimitAlgorithm {
     };
   }
 
+  /**
+   * Reset the stored key state for this limiter.
+   *
+   * @param key - Storage key to reset.
+   * @returns Resolves after the key is deleted.
+   */
   public async reset(key: string): Promise<void> {
     await this.storage.delete(key);
   }
 }
 
+/**
+ * Type guard for leaky-bucket state entries loaded from storage.
+ *
+ * @param value - Stored value to validate.
+ * @returns True when the value matches the LeakyBucketState shape.
+ */
 function isLeakyBucketState(value: unknown): value is LeakyBucketState {
   if (!value || typeof value !== 'object') return false;
   const state = value as LeakyBucketState;
@@ -118,6 +144,13 @@ function isLeakyBucketState(value: unknown): value is LeakyBucketState {
   );
 }
 
+/**
+ * Estimate a TTL window large enough to cover full bucket drainage.
+ *
+ * @param capacity - Bucket capacity.
+ * @param leakRate - Tokens drained per second.
+ * @returns TTL in milliseconds.
+ */
 function estimateLeakyTtl(capacity: number, leakRate: number): number {
   if (leakRate <= 0) return 60_000;
   return Math.ceil((capacity / leakRate) * 1000 * 2);

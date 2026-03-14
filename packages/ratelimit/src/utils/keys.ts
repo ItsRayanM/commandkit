@@ -1,7 +1,9 @@
-﻿// Key construction helpers.
-//
-// Builds consistent storage keys for scopes and exemptions across
-// message and interaction sources so limits remain comparable.
+﻿/**
+ * Key construction helpers.
+ *
+ * Builds consistent storage keys for scopes and exemptions across
+ * message and interaction sources so limits remain comparable.
+ */
 
 import { Message } from 'discord.js';
 import type { Interaction } from 'discord.js';
@@ -35,26 +37,57 @@ export interface ResolvedScopeKey {
   key: string;
 }
 
+/**
+ * Apply an optional prefix to a storage key.
+ *
+ * @param prefix - Optional prefix to prepend.
+ * @param key - Base key to prefix.
+ * @returns Prefixed key.
+ */
 function applyPrefix(prefix: string | undefined, key: string): string {
   if (!prefix) return key;
   return `${prefix}${key}`;
 }
 
+/**
+ * Resolve a user id from a message or interaction.
+ *
+ * @param source - Interaction or message source.
+ * @returns User id or null when unavailable.
+ */
 function getUserId(source: Interaction | Message): string | null {
   if (source instanceof Message) return source.author.id;
   return source.user?.id ?? null;
 }
 
+/**
+ * Resolve a guild id from a message or interaction.
+ *
+ * @param source - Interaction or message source.
+ * @returns Guild id or null when unavailable.
+ */
 function getGuildId(source: Interaction | Message): string | null {
   if (source instanceof Message) return source.guildId ?? null;
   return source.guildId ?? null;
 }
 
+/**
+ * Resolve a channel id from a message or interaction.
+ *
+ * @param source - Interaction or message source.
+ * @returns Channel id or null when unavailable.
+ */
 function getChannelId(source: Interaction | Message): string | null {
   if (source instanceof Message) return source.channelId ?? null;
   return source.channelId ?? null;
 }
 
+/**
+ * Resolve a parent category id from a channel object.
+ *
+ * @param channel - Channel object to inspect.
+ * @returns Parent id or null when unavailable.
+ */
 function getParentId(channel: unknown): string | null {
   if (!channel || typeof channel !== 'object') return null;
   if (!('parentId' in channel)) return null;
@@ -62,6 +95,12 @@ function getParentId(channel: unknown): string | null {
   return parentId ?? null;
 }
 
+/**
+ * Resolve a category id from a message or interaction.
+ *
+ * @param source - Interaction or message source.
+ * @returns Category id or null when unavailable.
+ */
 function getCategoryId(source: Interaction | Message): string | null {
   if (source instanceof Message) {
     return getParentId(source.channel);
@@ -71,6 +110,9 @@ function getCategoryId(source: Interaction | Message): string | null {
 
 /**
  * Extract role IDs from a message/interaction for role-based limits.
+ *
+ * @param source - Interaction or message to read role data from.
+ * @returns Array of role IDs for the source, or an empty array.
  */
 export function getRoleIds(source: Interaction | Message): string[] {
   const roles = source.member?.roles;
@@ -84,6 +126,11 @@ export function getRoleIds(source: Interaction | Message): string[] {
 
 /**
  * Build a storage key for a temporary exemption entry.
+ *
+ * @param scope - Exemption scope to encode.
+ * @param id - Scope identifier (user, guild, role, etc.).
+ * @param keyPrefix - Optional prefix to prepend to the key.
+ * @returns Fully-qualified exemption storage key.
  */
 export function buildExemptionKey(
   scope: RateLimitExemptionScope,
@@ -96,6 +143,10 @@ export function buildExemptionKey(
 
 /**
  * Build a prefix for scanning exemption keys in storage.
+ *
+ * @param keyPrefix - Optional prefix to prepend to the key.
+ * @param scope - Optional exemption scope to narrow the prefix.
+ * @returns Prefix suitable for storage scans.
  */
 export function buildExemptionPrefix(
   keyPrefix?: string,
@@ -109,6 +160,10 @@ export function buildExemptionPrefix(
 
 /**
  * Parse an exemption key into scope and ID for listing.
+ *
+ * @param key - Exemption key to parse.
+ * @param keyPrefix - Optional prefix to strip before parsing.
+ * @returns Parsed scope/id pair or null when the key is invalid.
  */
 export function parseExemptionKey(
   key: string,
@@ -128,6 +183,10 @@ export function parseExemptionKey(
 
 /**
  * Resolve all exemption keys that could apply to a source.
+ *
+ * @param source - Interaction or message to resolve keys for.
+ * @param keyPrefix - Optional prefix to prepend to keys.
+ * @returns Exemption keys that should be checked for the source.
  */
 export function resolveExemptionKeys(
   source: Interaction | Message,
@@ -165,6 +224,9 @@ export function resolveExemptionKeys(
 
 /**
  * Resolve the storage key for a single scope.
+ *
+ * @param params - Inputs required to resolve the scope key.
+ * @returns Resolved scope key or null when required identifiers are missing.
  */
 export function resolveScopeKey({
   ctx,
@@ -245,6 +307,9 @@ export function resolveScopeKey({
 
 /**
  * Resolve keys for multiple scopes, dropping unresolvable ones.
+ *
+ * @param params - Inputs required to resolve all scope keys.
+ * @returns Array of resolved scope keys.
  */
 export function resolveScopeKeys(
   params: Omit<ResolveScopeKeyParams, 'scope'> & {
@@ -261,6 +326,11 @@ export function resolveScopeKeys(
 
 /**
  * Build a prefix for resets by scope/identifier.
+ *
+ * @param scope - Scope to build the prefix for.
+ * @param keyPrefix - Optional prefix to prepend to the key.
+ * @param identifiers - Identifiers required for the scope.
+ * @returns Prefix string or null when identifiers are missing.
  */
 export function buildScopePrefix(
   scope: RateLimitScope,

@@ -1,7 +1,9 @@
-﻿// Rate limit type contracts.
-//
-// Shared config and result shapes for the plugin, engine, storage, and helpers.
-// Keeping them in one place reduces drift between runtime behavior and docs.
+﻿/**
+ * Rate limit type contracts.
+ *
+ * Shared config and result shapes for the plugin, engine, storage, and helpers.
+ * Keeping them in one place reduces drift between runtime behavior and docs.
+ */
 
 import type { Interaction, Message } from 'discord.js';
 import type { Context } from 'commandkit';

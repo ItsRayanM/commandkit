@@ -1,4 +1,4 @@
-import { Logger, RuntimePlugin, defer } from 'commandkit';
+﻿import { Logger, RuntimePlugin, defer } from 'commandkit';
 import type {
   CommandKitEnvironment,
   CommandKitPluginRuntime,
@@ -60,6 +60,8 @@ type RateLimitEventPayload = {
 
 /**
  * Runtime plugin that enforces rate limits for CommandKit commands so handlers stay lean.
+ *
+ * @extends RuntimePlugin<RateLimitPluginOptions>
  */
 export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
   public readonly name = 'RateLimitPlugin';
@@ -75,6 +77,10 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
 
   /**
    * Initialize runtime storage and defaults for this plugin instance.
+   *
+   * @param ctx - CommandKit runtime for the active application.
+   * @returns Resolves when runtime storage has been initialized.
+   * @throws Error when the plugin has not been configured.
    */
   public async activate(ctx: CommandKitPluginRuntime): Promise<void> {
     if (!isRateLimitConfigured()) {
@@ -106,6 +112,8 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
 
   /**
    * Dispose queues and clear shared runtime state.
+   *
+   * @returns Resolves after queues are aborted and runtime state is cleared.
    */
   public async deactivate(): Promise<void> {
     for (const queue of this.queues.values()) {
@@ -117,6 +125,13 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
 
   /**
    * Evaluate rate limits and optionally queue execution to avoid dropping commands.
+   *
+   * @param ctx - CommandKit runtime for the active application.
+   * @param env - Command execution environment.
+   * @param source - Interaction or message triggering the command.
+   * @param prepared - Prepared command execution data.
+   * @param execute - Callback that executes the command handler.
+   * @returns True when execution is deferred or handled, otherwise false to continue.
    */
   public async executeCommand(
     ctx: CommandKitPluginRuntime,
@@ -290,7 +305,9 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
       }
     }
 
-    // Aggregate across all scopes/windows so callers see a single response.
+    /**
+     * Aggregate across all scopes/windows so callers see a single response.
+     */
     const aggregate = aggregateResults(results);
     env.store.set(RATELIMIT_STORE_KEY, aggregate);
 
@@ -388,6 +405,10 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
 
   /**
    * Clear matching keys when a command is hot-reloaded to avoid stale state.
+   *
+   * @param ctx - CommandKit runtime for the active application.
+   * @param event - HMR event describing the changed file.
+   * @returns Resolves after matching keys are cleared and the event is handled.
    */
   public async performHMR(
     ctx: CommandKitPluginRuntime,
@@ -418,6 +439,12 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     event.preventDefault();
   }
 
+  /**
+   * Resolve a cached engine instance for a storage backend.
+   *
+   * @param storage - Storage backend to associate with the engine.
+   * @returns Cached engine instance for the storage.
+   */
   private getEngine(storage: RateLimitStorage): RateLimitEngine {
     const existing = this.engines.get(storage);
     if (existing) return existing;
@@ -426,6 +453,12 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return engine;
   }
 
+  /**
+   * Normalize a storage config into a storage driver instance.
+   *
+   * @param config - Storage config or driver.
+   * @returns Storage driver instance or null when not configured.
+   */
   private resolveStorage(
     config?: RateLimitStorageConfig,
   ): RateLimitStorage | null {
@@ -434,6 +467,11 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return config;
   }
 
+  /**
+   * Resolve the default storage, falling back to memory when enabled.
+   *
+   * @returns Resolved storage instance or null when disabled.
+   */
   private resolveDefaultStorage(): RateLimitStorage | null {
     const resolved =
       this.resolveStorage(this.options.storage) ?? getRateLimitStorage();
@@ -448,6 +486,11 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return this.memoryStorage;
   }
 
+  /**
+   * Log a one-time error when storage is missing.
+   *
+   * @returns Nothing; logs at most once per process.
+   */
   private logMissingStorage(): void {
     if (this.hasLoggedMissingStorage) return;
     this.hasLoggedMissingStorage = true;
@@ -456,6 +499,13 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     );
   }
 
+  /**
+   * Emit a ratelimited event through CommandKit's event bus.
+   *
+   * @param ctx - CommandKit runtime for the active application.
+   * @param payload - Rate-limit event payload to emit.
+   * @returns Nothing; emits the event when available.
+   */
   private emitRateLimited(
     ctx: CommandKitPluginRuntime,
     payload: RateLimitEventPayload,
@@ -463,10 +513,18 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     ctx.commandkit.events?.to('ratelimits').emit('ratelimited', payload);
   }
 
+  /**
+   * Determine whether a source should bypass rate limits.
+   *
+   * @param source - Interaction or message to evaluate.
+   * @returns True when the source should bypass rate limiting.
+   */
   private async shouldBypass(source: Interaction | Message): Promise<boolean> {
     const bypass = this.options.bypass;
     if (bypass) {
-      // Check permanent allowlists first to avoid storage lookups.
+      /**
+       * Check permanent allowlists first to avoid storage lookups.
+       */
       const userId =
         source instanceof Message ? source.author.id : source.user?.id;
       if (userId && bypass.userIds?.includes(userId)) return true;
@@ -481,12 +539,16 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
       }
     }
 
-    // Check temporary exemptions stored in the rate limit storage next.
+    /**
+     * Check temporary exemptions stored in the rate limit storage next.
+     */
     if (await this.hasTemporaryBypass(source)) {
       return true;
     }
 
-    // Run custom predicate last so it can override previous checks.
+    /**
+     * Run custom predicate last so it can override previous checks.
+     */
     if (bypass?.check) {
       return Boolean(await bypass.check(source));
     }
@@ -494,6 +556,12 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return false;
   }
 
+  /**
+   * Check for temporary exemptions in storage for the source.
+   *
+   * @param source - Interaction or message to evaluate.
+   * @returns True when a temporary exemption is found.
+   */
   private async hasTemporaryBypass(
     source: Interaction | Message,
   ): Promise<boolean> {
@@ -517,6 +585,14 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return false;
   }
 
+  /**
+   * Send the default rate-limited response when no custom handler is set.
+   *
+   * @param env - Command execution environment.
+   * @param source - Interaction or message that was limited.
+   * @param info - Aggregated rate-limit info for the response.
+   * @returns Resolves after the response is sent.
+   */
   private async respondRateLimited(
     env: CommandKitEnvironment,
     source: Interaction | Message,
@@ -571,6 +647,12 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     }
   }
 
+  /**
+   * Enqueue a command execution for later retry under queue rules.
+   *
+   * @param params - Queue execution parameters.
+   * @returns True when the execution was queued.
+   */
   private async enqueueExecution(params: {
     queueKey: string;
     queue: NormalizedQueueOptions;
@@ -586,7 +668,9 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     const queue = this.getQueue(params.queueKey, params.queue);
     const size = queue.getPending() + queue.getRunning();
     if (size >= params.queue.maxSize) {
-      // Queue full: fall back to immediate rate-limit handling to avoid unbounded growth.
+      /**
+       * Queue full: fall back to immediate rate-limit handling to avoid unbounded growth.
+       */
       return false;
     }
 
@@ -642,6 +726,13 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return true;
   }
 
+  /**
+   * Get or create an async queue for the given key.
+   *
+   * @param key - Queue identifier.
+   * @param options - Normalized queue settings.
+   * @returns Async queue instance.
+   */
   private getQueue(key: string, options: NormalizedQueueOptions): AsyncQueue {
     const existing = this.queues.get(key);
     if (existing) return existing;
@@ -650,6 +741,14 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return queue;
   }
 
+  /**
+   * Consume limits for queued execution to decide whether to run now.
+   *
+   * @param engine - Rate limit engine.
+   * @param limiter - Resolved limiter configuration.
+   * @param resolvedKeys - Scope keys to consume.
+   * @returns Aggregated rate-limit info for the queue check.
+   */
   private async consumeForQueue(
     engine: RateLimitEngine,
     limiter: RateLimitLimiterConfig,
@@ -671,6 +770,13 @@ export class RateLimitPlugin extends RuntimePlugin<RateLimitPluginOptions> {
     return aggregateResults(results);
   }
 
+  /**
+   * Defer interaction replies when queueing and the source is repliable.
+   *
+   * @param source - Interaction or message that may be deferred.
+   * @param queue - Normalized queue settings.
+   * @returns Resolves after attempting to defer the interaction.
+   */
   private async deferInteractionIfNeeded(
     source: Interaction | Message,
     queue: NormalizedQueueOptions,
@@ -701,6 +807,12 @@ interface NormalizedQueueOptions {
   concurrency: number;
 }
 
+/**
+ * Normalize scope input into a de-duplicated scope array.
+ *
+ * @param scope - Scope config value.
+ * @returns Array of scopes to enforce.
+ */
 function normalizeScopes(
   scope: RateLimitLimiterConfig['scope'] | undefined,
 ): RateLimitScope[] {
@@ -709,6 +821,12 @@ function normalizeScopes(
   return [scope];
 }
 
+/**
+ * Aggregate multiple rate-limit results into a single summary object.
+ *
+ * @param results - Individual limiter/window results.
+ * @returns Aggregated rate-limit store value.
+ */
 function aggregateResults(results: RateLimitResult[]): RateLimitStoreValue {
   if (!results.length) {
     return createEmptyStoreValue();
@@ -731,11 +849,23 @@ function aggregateResults(results: RateLimitResult[]): RateLimitStoreValue {
   };
 }
 
+/**
+ * Append a window suffix to a key when a window id is present.
+ *
+ * @param key - Base storage key.
+ * @param windowId - Optional window identifier.
+ * @returns Key with window suffix when provided.
+ */
 function withWindowSuffix(key: string, windowId?: string): string {
   if (!windowId) return key;
   return `${key}:w:${windowId}`;
 }
 
+/**
+ * Create an empty aggregate result for cases with no limiter results.
+ *
+ * @returns Empty rate-limit store value.
+ */
 function createEmptyStoreValue(): RateLimitStoreValue {
   return {
     limited: false,
@@ -746,6 +876,12 @@ function createEmptyStoreValue(): RateLimitStoreValue {
   };
 }
 
+/**
+ * Merge multiple role limit maps, with later maps overriding earlier ones.
+ *
+ * @param limits - Role limit maps ordered from lowest to highest priority.
+ * @returns Merged role limits or undefined when empty.
+ */
 function mergeRoleLimits(
   ...limits: Array<Record<string, RateLimitLimiterConfig> | undefined>
 ): Record<string, RateLimitLimiterConfig> | undefined {
@@ -757,6 +893,14 @@ function mergeRoleLimits(
   return Object.keys(merged).length ? merged : undefined;
 }
 
+/**
+ * Resolve a role-specific limiter for a source using a strategy.
+ *
+ * @param limits - Role limit map keyed by role id.
+ * @param strategy - Role limit strategy to apply.
+ * @param source - Interaction or message to resolve roles from.
+ * @returns Resolved role limiter or null when none match.
+ */
 function resolveRoleLimit(
   limits: Record<string, RateLimitLimiterConfig> | undefined,
   strategy: RateLimitRoleLimitStrategy | undefined,
@@ -791,6 +935,12 @@ function resolveRoleLimit(
   return scored[0]?.limiter ?? null;
 }
 
+/**
+ * Compute a comparable score for a limiter for role-strategy sorting.
+ *
+ * @param limiter - Limiter configuration to score.
+ * @returns Minimum request rate across windows.
+ */
 function computeLimiterScore(limiter: RateLimitLimiterConfig): number {
   const resolvedConfigs = resolveLimiterConfigs(limiter, 'user');
   if (!resolvedConfigs.length) return 0;
@@ -800,6 +950,12 @@ function computeLimiterScore(limiter: RateLimitLimiterConfig): number {
   return Math.min(...scores);
 }
 
+/**
+ * Merge and normalize queue options across config layers.
+ *
+ * @param options - Queue option layers ordered from lowest to highest priority.
+ * @returns Normalized queue options.
+ */
 function resolveQueueOptions(
   ...options: Array<RateLimitQueueOptions | undefined>
 ): NormalizedQueueOptions {
@@ -820,6 +976,12 @@ function resolveQueueOptions(
   };
 }
 
+/**
+ * Select the queue key from the result with the longest retry delay.
+ *
+ * @param results - Rate limit results for the command.
+ * @returns Queue key to use for serialization.
+ */
 function selectQueueKey(results: RateLimitResult[]): string {
   let target: RateLimitResult | undefined;
   for (const result of results) {
@@ -831,10 +993,24 @@ function selectQueueKey(results: RateLimitResult[]): string {
   return (target ?? results[0])?.key ?? 'ratelimit:queue';
 }
 
+/**
+ * Delay execution for a given duration.
+ *
+ * @param ms - Delay duration in milliseconds.
+ * @returns Promise that resolves after the delay.
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Reset all rate-limit keys for a specific command name.
+ *
+ * @param storage - Storage backend to delete from.
+ * @param keyPrefix - Optional prefix to prepend to the key.
+ * @param commandName - Command name to reset.
+ * @returns Resolves after matching keys are deleted.
+ */
 async function resetByCommand(
   storage: RateLimitStorage,
   keyPrefix: string | undefined,
@@ -849,6 +1025,12 @@ async function resetByCommand(
   await storage.deleteByPattern(`violation:${pattern}:w:*`);
 }
 
+/**
+ * Normalize path separators to forward slashes for comparisons.
+ *
+ * @param path - Path to normalize.
+ * @returns Normalized path string.
+ */
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/');
 }

@@ -1,6 +1,8 @@
-﻿// Vitest setup for ratelimit specs.
-//
-// Restores the Console constructor so logging helpers behave consistently.
+﻿/**
+ * Vitest setup for ratelimit specs.
+ *
+ * Restores the Console constructor so logging helpers behave consistently.
+ */
 
 import { Console } from 'node:console';
 

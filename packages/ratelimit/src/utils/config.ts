@@ -1,7 +1,9 @@
-﻿// Limiter config resolution.
-//
-// Applies defaults and merges overrides into concrete limiter settings
-// used by the engine and plugin.
+﻿/**
+ * Limiter config resolution.
+ *
+ * Applies defaults and merges overrides into concrete limiter settings
+ * used by the engine and plugin.
+ */
 
 import type {
   RateLimitAlgorithmType,
@@ -29,6 +31,9 @@ export const DEFAULT_LIMITER: RateLimitLimiterConfig = {
 
 /**
  * Merge limiter configs; later values override earlier ones for layering.
+ *
+ * @param configs - Limiter configs ordered from lowest to highest priority.
+ * @returns Merged limiter config with later overrides applied.
  */
 export function mergeLimiterConfigs(
   ...configs: Array<RateLimitLimiterConfig | undefined>
@@ -41,6 +46,10 @@ export function mergeLimiterConfigs(
 
 /**
  * Resolve a limiter config for a single scope with defaults applied.
+ *
+ * @param config - Base limiter configuration.
+ * @param scope - Scope to resolve for the limiter.
+ * @returns Resolved limiter config with defaults and derived values.
  */
 export function resolveLimiterConfig(
   config: RateLimitLimiterConfig,
@@ -85,14 +94,27 @@ export function resolveLimiterConfig(
   };
 }
 
+/**
+ * Resolve a stable window id when one is missing.
+ *
+ * @param window - Window config entry.
+ * @param index - Index of the window in the config list.
+ * @returns Window id string.
+ */
 function resolveWindowId(window: RateLimitWindowConfig, index: number): string {
   if (window.id && window.id.trim()) return window.id;
-  // Stable fallback IDs keep window identity deterministic for resets.
+  /**
+   * Stable fallback IDs keep window identity deterministic for resets.
+   */
   return `w${index + 1}`;
 }
 
 /**
  * Resolve limiter configs for a scope across all configured windows.
+ *
+ * @param config - Base limiter configuration that may include windows.
+ * @param scope - Scope to resolve for the limiter.
+ * @returns Resolved limiter configs for each window (or a single config).
  */
 export function resolveLimiterConfigs(
   config: RateLimitLimiterConfig,

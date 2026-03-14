@@ -1,6 +1,8 @@
-﻿// Public rate limit helpers.
-//
-// Used by handlers and admin tools to inspect, reset, and manage exemptions.
+﻿/**
+ * Public rate limit helpers.
+ *
+ * Used by handlers and admin tools to inspect, reset, and manage exemptions.
+ */
 
 import type { CommandKitEnvironment, Context } from 'commandkit';
 import { RATELIMIT_STORE_KEY } from './constants';
@@ -51,6 +53,9 @@ export interface ResetAllRateLimitsParams {
 
 /**
  * Read aggregated rate limit info stored on a CommandKit env or context.
+ *
+ * @param envOrCtx - CommandKit environment or context holding the rate-limit store.
+ * @returns Aggregated rate-limit info or null when no store is present.
  */
 export function getRateLimitInfo(
   envOrCtx: CommandKitEnvironment | Context | null | undefined,
@@ -61,10 +66,22 @@ export function getRateLimitInfo(
   return (store.get(RATELIMIT_STORE_KEY) as RateLimitStoreValue) ?? null;
 }
 
+/**
+ * Resolve the active storage or throw when none is configured.
+ *
+ * @returns Configured rate-limit storage.
+ * @throws Error when storage is not configured.
+ */
 function getRequiredStorage(): RateLimitStorage {
   return getRuntimeStorage().storage;
 }
 
+/**
+ * Resolve runtime context plus the effective storage to use.
+ *
+ * @returns Runtime context (if any) and the resolved storage.
+ * @throws Error when storage is not configured.
+ */
 function getRuntimeStorage(): {
   runtime: ReturnType<typeof getRateLimitRuntime>;
   storage: RateLimitStorage;
@@ -77,12 +94,22 @@ function getRuntimeStorage(): {
   return { runtime, storage };
 }
 
+/**
+ * Normalize a prefix to include the window suffix marker.
+ *
+ * @param prefix - Base key prefix.
+ * @returns Prefix guaranteed to end with `w:`.
+ */
 function toWindowPrefix(prefix: string): string {
   return prefix.endsWith(':') ? `${prefix}w:` : `${prefix}:w:`;
 }
 
 /**
  * Reset a single key and its violation/window variants to keep state consistent.
+ *
+ * @param params - Reset parameters for a single key or scope-derived key.
+ * @returns Resolves when deletes and reset hooks (if any) complete.
+ * @throws Error when required scope identifiers are missing.
  */
 export async function resetRateLimit(
   params: ResetRateLimitParams,
@@ -127,6 +154,11 @@ export async function resetRateLimit(
 
 /**
  * Reset multiple keys by scope, command name, prefix, or pattern for bulk cleanup.
+ *
+ * @param params - Batch reset parameters, defaulting to an empty config.
+ * @returns Resolves when all matching keys are deleted.
+ * @throws Error when the storage backend lacks required delete helpers.
+ * @throws Error when scope identifiers are missing for scope-based resets.
  */
 export async function resetAllRateLimits(
   params: ResetAllRateLimitsParams = {},
@@ -196,6 +228,10 @@ export async function resetAllRateLimits(
 
 /**
  * Grant a temporary exemption for a scope/id pair.
+ *
+ * @param params - Exemption scope, id, and duration.
+ * @returns Resolves when the exemption key is written.
+ * @throws Error when duration is missing or non-positive.
  */
 export async function grantRateLimitExemption(
   params: RateLimitExemptionGrantParams,
@@ -214,6 +250,9 @@ export async function grantRateLimitExemption(
 
 /**
  * Revoke a temporary exemption for a scope/id pair.
+ *
+ * @param params - Exemption scope and id to revoke.
+ * @returns Resolves when the exemption key is removed.
  */
 export async function revokeRateLimitExemption(
   params: RateLimitExemptionRevokeParams,
@@ -226,6 +265,10 @@ export async function revokeRateLimitExemption(
 
 /**
  * List exemptions by scope and/or id for admin/reporting.
+ *
+ * @param params - Optional scope/id filters and limits.
+ * @returns Exemption info entries that match the requested filters.
+ * @throws Error when scope is required but missing or listing is unsupported.
  */
 export async function listRateLimitExemptions(
   params: RateLimitExemptionListParams = {},
@@ -281,6 +324,13 @@ export async function listRateLimitExemptions(
   return results;
 }
 
+/**
+ * Delete windowed variants for a base key using available storage helpers.
+ *
+ * @param storage - Storage driver to delete from.
+ * @param key - Base key to delete window variants for.
+ * @returns Resolves after window variants are removed.
+ */
 async function deleteWindowVariants(
   storage: RateLimitStorage,
   key: string,

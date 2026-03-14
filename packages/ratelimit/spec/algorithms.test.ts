@@ -1,6 +1,8 @@
-﻿// Algorithm integration tests.
-//
-// Fake timers keep limiter math deterministic and avoid flakiness.
+﻿/**
+ * Algorithm integration tests.
+ *
+ * Fake timers keep limiter math deterministic and avoid flakiness.
+ */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { MemoryRateLimitStorage } from '../src/storage/memory';
@@ -13,6 +15,11 @@ import type { RateLimitStorage } from '../src/types';
 const scope = 'user' as const;
 const delay = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Test storage that delays sorted-set calls to simulate contention.
+ *
+ * @implements RateLimitStorage
+ */
 class DelayedSlidingWindowStorage implements RateLimitStorage {
   private readonly kv = new Map<string, unknown>();
   private readonly zset = new MemoryRateLimitStorage();
@@ -60,6 +67,11 @@ class DelayedSlidingWindowStorage implements RateLimitStorage {
   }
 }
 
+/**
+ * Test storage that delays key/value calls for fixed-window tests.
+ *
+ * @implements RateLimitStorage
+ */
 class DelayedFixedWindowStorage implements RateLimitStorage {
   private readonly kv = new Map<string, unknown>();
 

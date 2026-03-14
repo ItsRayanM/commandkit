@@ -1,7 +1,9 @@
-// Fixed window rate limiting.
-//
-// Simple counters per window are fast and predictable, at the cost of allowing
-// bursts within the window boundary. Prefer atomic storage for correctness.
+﻿/**
+ * Fixed window rate limiting.
+ *
+ * Simple counters per window are fast and predictable, at the cost of allowing
+ * bursts within the window boundary. Prefer atomic storage for correctness.
+ */
 
 import type {
   RateLimitAlgorithm,
@@ -25,10 +27,18 @@ interface FixedWindowState {
 
 /**
  * Basic fixed-window counter for low-cost rate limits.
+ *
+ * @implements RateLimitAlgorithm
  */
 export class FixedWindowAlgorithm implements RateLimitAlgorithm {
   public readonly type: RateLimitAlgorithmType = 'fixed-window';
 
+  /**
+   * Create a fixed-window algorithm bound to a storage backend.
+   *
+   * @param storage - Storage backend for rate-limit state.
+   * @param config - Fixed-window configuration.
+   */
   public constructor(
     private readonly storage: RateLimitStorage,
     private readonly config: FixedWindowConfig,
@@ -36,6 +46,9 @@ export class FixedWindowAlgorithm implements RateLimitAlgorithm {
 
   /**
    * Record one attempt and return the current window status for this key.
+   *
+   * @param key - Storage key for the limiter.
+   * @returns Rate limit result for the current window.
    */
   public async consume(key: string): Promise<RateLimitResult> {
     const limit = this.config.maxRequests;
@@ -80,8 +93,10 @@ export class FixedWindowAlgorithm implements RateLimitAlgorithm {
       };
     }
 
-    // Fallback is serialized per process to avoid same-instance races.
-    // Multi-process strictness still requires atomic storage operations.
+    /**
+     * Fallback is serialized per process to avoid same-instance races.
+     * Multi-process strictness still requires atomic storage operations.
+     */
     return withStorageKeyLock(this.storage, key, async () => {
       const maxRetries = 5;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -189,11 +204,23 @@ export class FixedWindowAlgorithm implements RateLimitAlgorithm {
     });
   }
 
+  /**
+   * Reset the stored key state for this limiter.
+   *
+   * @param key - Storage key to reset.
+   * @returns Resolves after the key is deleted.
+   */
   public async reset(key: string): Promise<void> {
     await this.storage.delete(key);
   }
 }
 
+/**
+ * Type guard for fixed-window state entries loaded from storage.
+ *
+ * @param value - Stored value to validate.
+ * @returns True when the value matches the FixedWindowState shape.
+ */
 function isFixedWindowState(value: unknown): value is FixedWindowState {
   if (!value || typeof value !== 'object') return false;
   const state = value as FixedWindowState;

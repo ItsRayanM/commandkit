@@ -1,7 +1,9 @@
-// Sliding window log rate limiting.
-//
-// Tracks individual request timestamps for smoother limits and accurate retry
-// timing. Requires sorted-set support or an atomic storage helper.
+﻿/**
+ * Sliding window log rate limiting.
+ *
+ * Tracks individual request timestamps for smoother limits and accurate retry
+ * timing. Requires sorted-set support or an atomic storage helper.
+ */
 
 import type {
   RateLimitAlgorithm,
@@ -19,10 +21,18 @@ interface SlidingWindowConfig {
 
 /**
  * Sliding-window log algorithm for smoother limits.
+ *
+ * @implements RateLimitAlgorithm
  */
 export class SlidingWindowLogAlgorithm implements RateLimitAlgorithm {
   public readonly type: RateLimitAlgorithmType = 'sliding-window';
 
+  /**
+   * Create a sliding-window algorithm bound to a storage backend.
+   *
+   * @param storage - Storage backend for rate-limit state.
+   * @param config - Sliding-window configuration.
+   */
   public constructor(
     private readonly storage: RateLimitStorage,
     private readonly config: SlidingWindowConfig,
@@ -30,6 +40,10 @@ export class SlidingWindowLogAlgorithm implements RateLimitAlgorithm {
 
   /**
    * Record one attempt and return the current window status for this key.
+   *
+   * @param key - Storage key for the limiter.
+   * @returns Rate limit result for the current window.
+   * @throws Error when the storage backend lacks sorted-set support.
    */
   public async consume(key: string): Promise<RateLimitResult> {
     const limit = this.config.maxRequests;
@@ -37,7 +51,9 @@ export class SlidingWindowLogAlgorithm implements RateLimitAlgorithm {
 
     if (this.storage.consumeSlidingWindowLog) {
       const now = Date.now();
-      // Include the timestamp so reset time can be derived without extra reads.
+      /**
+       * Include the timestamp so reset time can be derived without extra reads.
+       */
       const member = `${now}-${Math.random().toString(36).slice(2, 8)}`;
       const res = await this.storage.consumeSlidingWindowLog(
         key,
@@ -69,9 +85,13 @@ export class SlidingWindowLogAlgorithm implements RateLimitAlgorithm {
 
     return withStorageKeyLock(this.storage, key, async () => {
       const now = Date.now();
-      // Include the timestamp so reset time can be derived without extra reads.
+      /**
+       * Include the timestamp so reset time can be derived without extra reads.
+       */
       const member = `${now}-${Math.random().toString(36).slice(2, 8)}`;
-      // Fallback is serialized per process; multi-process strictness needs atomic storage.
+      /**
+       * Fallback is serialized per process; multi-process strictness needs atomic storage.
+       */
       await this.storage.zRemRangeByScore!(key, 0, now - windowMs);
       const count = await this.storage.zCard!(key);
 
@@ -130,6 +150,12 @@ export class SlidingWindowLogAlgorithm implements RateLimitAlgorithm {
     });
   }
 
+  /**
+   * Reset the stored key state for this limiter.
+   *
+   * @param key - Storage key to reset.
+   * @returns Resolves after the key is deleted.
+   */
   public async reset(key: string): Promise<void> {
     await this.storage.delete(key);
   }

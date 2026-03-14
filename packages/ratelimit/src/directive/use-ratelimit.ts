@@ -1,7 +1,9 @@
-﻿// Runtime wrapper for the "use ratelimit" directive.
-//
-// Uses the runtime default limiter for arbitrary async functions.
-// Throws RateLimitError when the call is limited.
+﻿/**
+ * Runtime wrapper for the "use ratelimit" directive.
+ *
+ * Uses the runtime default limiter for arbitrary async functions.
+ * Throws RateLimitError when the call is limited.
+ */
 
 import { randomUUID } from 'node:crypto';
 import type { AsyncFunction, GenericFunction } from 'commandkit';
@@ -26,8 +28,16 @@ const RATELIMIT_FN_SYMBOL = Symbol('commandkit.ratelimit.directive');
 let cachedEngine: RateLimitEngine | null = null;
 let cachedStorage: RateLimitStorage | null = null;
 
+/**
+ * Resolve the cached engine instance for a storage backend.
+ *
+ * @param storage - Storage backend to associate with the engine.
+ * @returns Cached engine instance for the storage.
+ */
 function getEngine(storage: RateLimitStorage): RateLimitEngine {
-  // Cache per storage instance so violation tracking stays consistent.
+  /**
+   * Cache per storage instance so violation tracking stays consistent.
+   */
   if (!cachedEngine || cachedStorage !== storage) {
     cachedEngine = new RateLimitEngine(storage);
     cachedStorage = storage;
@@ -35,16 +45,37 @@ function getEngine(storage: RateLimitStorage): RateLimitEngine {
   return cachedEngine;
 }
 
+/**
+ * Apply an optional prefix to a storage key.
+ *
+ * @param prefix - Optional prefix to prepend.
+ * @param key - Base key to prefix.
+ * @returns Prefixed key.
+ */
 function withPrefix(prefix: string | undefined, key: string): string {
   if (!prefix) return key;
   return `${prefix}${key}`;
 }
 
+/**
+ * Append a window suffix to a key when a window id is present.
+ *
+ * @param key - Base storage key.
+ * @param windowId - Optional window identifier.
+ * @returns Key with window suffix when provided.
+ */
 function withWindowSuffix(key: string, windowId?: string): string {
   if (!windowId) return key;
   return `${key}:w:${windowId}`;
 }
 
+/**
+ * Merge a runtime default limiter with an override when provided.
+ *
+ * @param runtimeDefault - Runtime default limiter configuration.
+ * @param limiter - Optional override limiter.
+ * @returns Resolved limiter configuration.
+ */
 function resolveLimiter(
   runtimeDefault: RateLimitLimiterConfig,
   limiter?: RateLimitLimiterConfig,
@@ -55,7 +86,14 @@ function resolveLimiter(
 
 /**
  * Wrap an async function with the runtime default limiter.
+ *
  * Throws RateLimitError when the call exceeds limits.
+ *
+ * @template R - Argument tuple type for the wrapped async function.
+ * @template F - Async function type being wrapped.
+ * @param fn - Async function to wrap with rate limiting.
+ * @returns Wrapped async function that enforces the default limiter.
+ * @throws RateLimitError when the call exceeds limits.
  */
 function useRateLimit<R extends any[], F extends AsyncFunction<R>>(fn: F): F {
   if (Object.prototype.hasOwnProperty.call(fn, RATELIMIT_FN_SYMBOL)) {
@@ -106,6 +144,12 @@ function useRateLimit<R extends any[], F extends AsyncFunction<R>>(fn: F): F {
   return wrapped;
 }
 
+/**
+ * Aggregate multiple rate-limit results into a single summary object.
+ *
+ * @param results - Individual limiter/window results.
+ * @returns Aggregated rate-limit store value.
+ */
 function aggregateResults(results: RateLimitResult[]): RateLimitStoreValue {
   if (!results.length) {
     return {
@@ -136,13 +180,18 @@ function aggregateResults(results: RateLimitResult[]): RateLimitStoreValue {
 
 /**
  * Wrapper symbol injected by the compiler plugin.
+ *
+ * @param fn - Generic function to wrap with runtime rate limiting.
+ * @returns Wrapped function that enforces the runtime default limiter.
  */
 export const $ckitirl: GenericFunction = (fn: GenericFunction) => {
   return useRateLimit(fn as AsyncFunction<any>);
 };
 
 if (!('$ckitirl' in globalThis)) {
-  // Expose the wrapper globally so directive transforms can call it.
+  /**
+   * Expose the wrapper globally so directive transforms can call it.
+   */
   Object.defineProperty(globalThis, '$ckitirl', {
     value: $ckitirl,
     configurable: false,

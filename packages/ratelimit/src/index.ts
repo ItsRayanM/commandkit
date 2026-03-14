@@ -1,4 +1,4 @@
-import './augmentation';
+﻿import './augmentation';
 import { RateLimitPlugin } from './plugin';
 import { UseRateLimitDirectivePlugin } from './directive/use-ratelimit-directive';
 import type { CommandKitPlugin } from 'commandkit';
@@ -6,7 +6,11 @@ import { getRateLimitConfig } from './configure';
 
 /**
  * Create compiler + runtime plugins for rate limiting.
+ *
  * Runtime options are provided via configureRatelimit().
+ *
+ * @param options - Optional compiler plugin configuration.
+ * @returns Ordered array of compiler and runtime plugins.
  */
 export function ratelimit(
   options?: Partial<{

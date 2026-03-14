@@ -1,6 +1,8 @@
-// Engine escalation tests.
-//
-// Fake timers keep violation cooldowns deterministic.
+﻿/**
+ * Engine escalation tests.
+ *
+ * Fake timers keep violation cooldowns deterministic.
+ */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { RateLimitEngine } from '../src/engine/RateLimitEngine';

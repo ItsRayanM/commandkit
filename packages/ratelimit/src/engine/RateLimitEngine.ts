@@ -1,6 +1,8 @@
-﻿// Engine coordinator.
-//
-// Selects algorithms and applies violation escalation before returning results.
+﻿/**
+ * Engine coordinator.
+ *
+ * Selects algorithms and applies violation escalation before returning results.
+ */
 
 import type {
   RateLimitAlgorithm,
@@ -29,13 +31,21 @@ export interface RateLimitConsumeOutput {
 export class RateLimitEngine {
   private readonly violations: ViolationTracker;
 
+  /**
+   * Create a rate limit engine bound to a storage backend.
+   *
+   * @param storage - Storage backend for rate-limit state.
+   */
   public constructor(private readonly storage: RateLimitStorage) {
     this.violations = new ViolationTracker(storage);
   }
 
-  /**
-   * Create an algorithm instance for a resolved config.
-   */
+/**
+ * Create an algorithm instance for a resolved config.
+ *
+ * @param config - Resolved limiter configuration.
+ * @returns Algorithm instance for the resolved config.
+ */
   private createAlgorithm(config: ResolvedLimiterConfig): RateLimitAlgorithm {
     switch (config.algorithm) {
       case 'fixed-window':
@@ -63,7 +73,9 @@ export class RateLimitEngine {
           scope: config.scope,
         });
       default:
-        // Fall back to fixed-window so unknown algorithms still enforce a limit.
+        /**
+         * Fall back to fixed-window so unknown algorithms still enforce a limit.
+         */
         return new FixedWindowAlgorithm(this.storage, {
           maxRequests: config.maxRequests,
           intervalMs: config.intervalMs,
@@ -74,6 +86,10 @@ export class RateLimitEngine {
 
   /**
    * Consume a single key and apply escalation rules when enabled.
+   *
+   * @param key - Storage key for the limiter.
+   * @param config - Resolved limiter configuration.
+   * @returns Result plus optional violation count.
    */
   public async consume(
     key: string,
@@ -85,7 +101,9 @@ export class RateLimitEngine {
     if (shouldEscalate) {
       const active = await this.violations.checkCooldown(key);
       if (active) {
-        // When an escalation cooldown is active, skip the algorithm to enforce the cooldown.
+        /**
+         * When an escalation cooldown is active, skip the algorithm to enforce the cooldown.
+         */
         const limit =
           config.algorithm === 'token-bucket' ||
           config.algorithm === 'leaky-bucket'
@@ -122,7 +140,9 @@ export class RateLimitEngine {
         config.violations,
       );
 
-      // If escalation extends the cooldown, update the result so retry info stays accurate.
+      /**
+       * If escalation extends the cooldown, update the result so retry info stays accurate.
+       */
       if (state.cooldownUntil > result.resetAt) {
         result.resetAt = state.cooldownUntil;
         result.retryAfter = Math.max(0, state.cooldownUntil - now);
@@ -136,6 +156,9 @@ export class RateLimitEngine {
 
   /**
    * Reset a key and its associated violation state.
+   *
+   * @param key - Storage key to reset.
+   * @returns Resolves after the key and violations are cleared.
    */
   public async reset(key: string): Promise<void> {
     await this.storage.delete(key);

@@ -1,6 +1,8 @@
-﻿// Violation tracking.
-//
-// Persists repeat violations so cooldowns can escalate predictably.
+﻿/**
+ * Violation tracking.
+ *
+ * Persists repeat violations so cooldowns can escalate predictably.
+ */
 
 import type { RateLimitStorage, ViolationOptions } from '../types';
 import { resolveDuration } from '../utils/time';
@@ -19,15 +21,23 @@ const DEFAULT_RESET_AFTER_MS = 60 * 60 * 1000;
  * Tracks repeated violations and computes escalating cooldowns.
  */
 export class ViolationTracker {
+  /**
+   * Create a violation tracker bound to a storage backend.
+   *
+   * @param storage - Storage backend for violation state.
+   */
   public constructor(private readonly storage: RateLimitStorage) {}
 
   private key(key: string): string {
     return `violation:${key}`;
   }
 
-  /**
-   * Read stored violation state for a key, if present.
-   */
+/**
+ * Read stored violation state for a key, if present.
+ *
+ * @param key - Storage key for the limiter.
+ * @returns Stored violation state or null when none is present.
+ */
   async getState(key: string): Promise<ViolationState | null> {
     const stored = await this.storage.get<ViolationState>(this.key(key));
     return isViolationState(stored) ? stored : null;
@@ -35,6 +45,9 @@ export class ViolationTracker {
 
   /**
    * Check if a cooldown is currently active for this key.
+   *
+   * @param key - Storage key for the limiter.
+   * @returns Violation state when cooldown is active, otherwise null.
    */
   async checkCooldown(key: string): Promise<ViolationState | null> {
     const state = await this.getState(key);
@@ -45,6 +58,11 @@ export class ViolationTracker {
 
   /**
    * Record a violation and return the updated state for callers.
+   *
+   * @param key - Storage key for the limiter.
+   * @param baseRetryAfterMs - Base retry delay in milliseconds.
+   * @param options - Optional escalation settings.
+   * @returns Updated violation state.
    */
   async recordViolation(
     key: string,
@@ -76,11 +94,23 @@ export class ViolationTracker {
     return state;
   }
 
+  /**
+   * Clear stored violation state for a key.
+   *
+   * @param key - Storage key to reset.
+   * @returns Resolves after the violation entry is deleted.
+   */
   async reset(key: string): Promise<void> {
     await this.storage.delete(this.key(key));
   }
 }
 
+/**
+ * Type guard for violation state entries loaded from storage.
+ *
+ * @param value - Stored value to validate.
+ * @returns True when the value matches the ViolationState shape.
+ */
 function isViolationState(value: unknown): value is ViolationState {
   if (!value || typeof value !== 'object') return false;
   const state = value as ViolationState;

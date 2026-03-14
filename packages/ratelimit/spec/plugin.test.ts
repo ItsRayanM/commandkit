@@ -1,6 +1,8 @@
-﻿// Plugin integration tests.
-//
-// Uses stubs to keep plugin tests fast and offline.
+﻿/**
+ * Plugin integration tests.
+ *
+ * Uses stubs to keep plugin tests fast and offline.
+ */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { MessageFlags } from 'discord.js';

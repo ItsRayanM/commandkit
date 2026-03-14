@@ -1,6 +1,8 @@
-﻿// Fallback storage wrapper.
-//
-// Routes storage calls to a secondary backend when the primary fails.
+﻿/**
+ * Fallback storage wrapper.
+ *
+ * Routes storage calls to a secondary backend when the primary fails.
+ */
 
 import { Logger } from 'commandkit';
 import type { RateLimitStorage } from '../types';
@@ -9,22 +11,40 @@ import type { RateLimitStorage } from '../types';
  * Options that control fallback logging/cooldown behavior.
  */
 export interface FallbackRateLimitStorageOptions {
-  /** Minimum time between fallback log entries (to avoid log spam). */
+  /**
+   * Minimum time between fallback log entries (to avoid log spam).
+   *
+   * @default 30000
+   */
   cooldownMs?: number;
 }
 
 /**
  * Storage wrapper that falls back to a secondary implementation on failure.
+ *
+ * @implements RateLimitStorage
  */
 export class FallbackRateLimitStorage implements RateLimitStorage {
   private lastErrorAt = 0;
 
+  /**
+   * Create a fallback wrapper with primary/secondary storages.
+   *
+   * @param primary - Primary storage backend.
+   * @param secondary - Secondary storage backend used on failure.
+   * @param options - Fallback logging and cooldown options.
+   */
   public constructor(
     private readonly primary: RateLimitStorage,
     private readonly secondary: RateLimitStorage,
     private readonly options: FallbackRateLimitStorageOptions = {},
   ) {}
 
+  /**
+   * Check whether a fallback error should be logged.
+   *
+   * @returns True when the log cooldown has elapsed.
+   */
   private shouldLog(): boolean {
     const now = Date.now();
     const cooldown = this.options.cooldownMs ?? 30_000;
@@ -35,6 +55,13 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     return false;
   }
 
+  /**
+   * Execute a storage operation with a fallback on failure.
+   *
+   * @param op - Primary operation.
+   * @param fallback - Secondary operation when primary fails.
+   * @returns Result from the primary or fallback operation.
+   */
   private async withFallback<T>(
     op: () => Promise<T>,
     fallback: () => Promise<T>,
@@ -49,6 +76,12 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     }
   }
 
+  /**
+   * Read a value using primary storage with fallback.
+   *
+   * @param key - Storage key to read.
+   * @returns Stored value or null when absent.
+   */
   async get<T = unknown>(key: string): Promise<T | null> {
     return this.withFallback(
       () => this.primary.get<T>(key),
@@ -56,6 +89,14 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Store a value using primary storage with fallback.
+   *
+   * @param key - Storage key to write.
+   * @param value - Value to store.
+   * @param ttlMs - Optional TTL in milliseconds.
+   * @returns Resolves when the value is stored.
+   */
   async set<T = unknown>(key: string, value: T, ttlMs?: number): Promise<void> {
     return this.withFallback(
       () => this.primary.set(key, value, ttlMs),
@@ -63,6 +104,12 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Delete a key using primary storage with fallback.
+   *
+   * @param key - Storage key to delete.
+   * @returns Resolves when the key is removed.
+   */
   async delete(key: string): Promise<void> {
     return this.withFallback(
       () => this.primary.delete(key),
@@ -70,6 +117,14 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Increment a fixed-window counter using primary storage with fallback.
+   *
+   * @param key - Storage key to increment.
+   * @param ttlMs - TTL window in milliseconds.
+   * @returns Fixed-window consume result.
+   * @throws Error when either storage lacks incr support.
+   */
   async incr(key: string, ttlMs: number) {
     if (!this.primary.incr || !this.secondary.incr) {
       throw new Error('incr not supported by both storages');
@@ -80,6 +135,13 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Read TTL using primary storage with fallback.
+   *
+   * @param key - Storage key to inspect.
+   * @returns Remaining TTL in ms or null when no TTL is set.
+   * @throws Error when either storage lacks ttl support.
+   */
   async ttl(key: string) {
     if (!this.primary.ttl || !this.secondary.ttl) {
       throw new Error('ttl not supported by both storages');
@@ -90,6 +152,14 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Update TTL using primary storage with fallback.
+   *
+   * @param key - Storage key to update.
+   * @param ttlMs - TTL in milliseconds.
+   * @returns Resolves after the TTL is updated.
+   * @throws Error when either storage lacks expire support.
+   */
   async expire(key: string, ttlMs: number) {
     if (!this.primary.expire || !this.secondary.expire) {
       throw new Error('expire not supported by both storages');
@@ -100,6 +170,14 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Add a member to a sorted set using primary storage with fallback.
+   *
+   * @param key - Sorted-set key.
+   * @param score - Score to associate with the member.
+   * @param member - Member identifier.
+   * @returns Resolves when the member is added.
+   */
   async zAdd(key: string, score: number, member: string) {
     if (!this.primary.zAdd || !this.secondary.zAdd) {
       throw new Error('zAdd not supported by both storages');
@@ -110,6 +188,14 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Remove sorted-set members in a score range with fallback.
+   *
+   * @param key - Sorted-set key.
+   * @param min - Minimum score (inclusive).
+   * @param max - Maximum score (inclusive).
+   * @returns Resolves when the range is removed.
+   */
   async zRemRangeByScore(key: string, min: number, max: number) {
     if (!this.primary.zRemRangeByScore || !this.secondary.zRemRangeByScore) {
       throw new Error('zRemRangeByScore not supported by both storages');
@@ -120,6 +206,12 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Count sorted-set members with fallback.
+   *
+   * @param key - Sorted-set key.
+   * @returns Number of members in the set.
+   */
   async zCard(key: string) {
     if (!this.primary.zCard || !this.secondary.zCard) {
       throw new Error('zCard not supported by both storages');
@@ -130,6 +222,14 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Read sorted-set members in a score range with fallback.
+   *
+   * @param key - Sorted-set key.
+   * @param min - Minimum score (inclusive).
+   * @param max - Maximum score (inclusive).
+   * @returns Ordered members in the score range.
+   */
   async zRangeByScore(key: string, min: number, max: number) {
     if (!this.primary.zRangeByScore || !this.secondary.zRangeByScore) {
       throw new Error('zRangeByScore not supported by both storages');
@@ -140,6 +240,16 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Atomically consume a fixed-window counter with fallback.
+   *
+   * @param key - Storage key to consume.
+   * @param limit - Request limit for the window.
+   * @param windowMs - Window size in milliseconds.
+   * @param nowMs - Current timestamp in milliseconds.
+   * @returns Fixed-window consume result.
+   * @throws Error when either storage lacks consumeFixedWindow support.
+   */
   async consumeFixedWindow(
     key: string,
     limit: number,
@@ -158,6 +268,17 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Atomically consume a sliding-window log with fallback.
+   *
+   * @param key - Storage key to consume.
+   * @param limit - Request limit for the window.
+   * @param windowMs - Window size in milliseconds.
+   * @param nowMs - Current timestamp in milliseconds.
+   * @param member - Member identifier for this request.
+   * @returns Sliding-window consume result.
+   * @throws Error when either storage lacks consumeSlidingWindowLog support.
+   */
   async consumeSlidingWindowLog(
     key: string,
     limit: number,
@@ -191,6 +312,13 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Delete keys with a prefix using primary storage with fallback.
+   *
+   * @param prefix - Prefix to match.
+   * @returns Resolves after matching keys are deleted.
+   * @throws Error when either storage lacks deleteByPrefix support.
+   */
   async deleteByPrefix(prefix: string) {
     if (!this.primary.deleteByPrefix || !this.secondary.deleteByPrefix) {
       throw new Error('deleteByPrefix not supported by both storages');
@@ -201,6 +329,13 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * Delete keys matching a pattern using primary storage with fallback.
+   *
+   * @param pattern - Glob pattern to match.
+   * @returns Resolves after matching keys are deleted.
+   * @throws Error when either storage lacks deleteByPattern support.
+   */
   async deleteByPattern(pattern: string) {
     if (!this.primary.deleteByPattern || !this.secondary.deleteByPattern) {
       throw new Error('deleteByPattern not supported by both storages');
@@ -211,6 +346,13 @@ export class FallbackRateLimitStorage implements RateLimitStorage {
     );
   }
 
+  /**
+   * List keys matching a prefix using primary storage with fallback.
+   *
+   * @param prefix - Prefix to match.
+   * @returns Matching keys.
+   * @throws Error when either storage lacks keysByPrefix support.
+   */
   async keysByPrefix(prefix: string) {
     if (!this.primary.keysByPrefix || !this.secondary.keysByPrefix) {
       throw new Error('keysByPrefix not supported by both storages');

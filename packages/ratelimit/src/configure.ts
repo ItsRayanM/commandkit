@@ -1,7 +1,9 @@
-// Runtime configuration for the rate limit plugin.
-//
-// Mirrors configureAI so runtime options can be set outside commandkit.config
-// before the plugin evaluates commands.
+﻿/**
+ * Runtime configuration for the rate limit plugin.
+ *
+ * Mirrors configureAI so runtime options can be set outside commandkit.config
+ * before the plugin evaluates commands.
+ */
 
 import { DEFAULT_LIMITER } from './utils/config';
 import {
@@ -19,6 +21,12 @@ import type {
 const rateLimitConfig: RateLimitPluginOptions = {};
 let configured = false;
 
+/**
+ * Normalize a storage config into a storage driver instance.
+ *
+ * @param config - Storage config or driver.
+ * @returns Storage driver instance or null when not configured.
+ */
 function resolveStorage(
   config: RateLimitStorageConfig,
 ): RateLimitStorage | null {
@@ -29,6 +37,12 @@ function resolveStorage(
   return config;
 }
 
+/**
+ * Apply updated config to the active runtime context.
+ *
+ * @param config - Runtime configuration updates.
+ * @returns Nothing; mutates the active runtime context when present.
+ */
 function updateRuntime(config: RateLimitPluginOptions): void {
   const runtime = getRateLimitRuntime();
   const storageOverride = config.storage
@@ -57,6 +71,8 @@ function updateRuntime(config: RateLimitPluginOptions): void {
 
 /**
  * Returns true once configureRatelimit has been called.
+ *
+ * @returns True when runtime configuration has been initialized.
  */
 export function isRateLimitConfigured(): boolean {
   return configured;
@@ -64,6 +80,8 @@ export function isRateLimitConfigured(): boolean {
 
 /**
  * Retrieves the current rate limit configuration.
+ *
+ * @returns The current in-memory rate limit config object.
  */
 export function getRateLimitConfig(): RateLimitPluginOptions {
   return rateLimitConfig;
@@ -71,7 +89,11 @@ export function getRateLimitConfig(): RateLimitPluginOptions {
 
 /**
  * Configures the rate limit plugin runtime options.
+ *
  * Call this once during startup (for example in src/ratelimit.ts).
+ *
+ * @param config - Runtime options to merge into the active configuration.
+ * @returns Nothing; updates runtime state in place.
  */
 export function configureRatelimit(
   config: RateLimitPluginOptions = {},

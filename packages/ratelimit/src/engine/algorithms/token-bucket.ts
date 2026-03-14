@@ -1,7 +1,9 @@
-// Token bucket rate limiting.
-//
-// Allows short bursts while refilling steadily up to a cap.
-// Bucket state is stored so limits stay consistent across commands.
+﻿/**
+ * Token bucket rate limiting.
+ *
+ * Allows short bursts while refilling steadily up to a cap.
+ * Bucket state is stored so limits stay consistent across commands.
+ */
 
 import type {
   RateLimitAlgorithm,
@@ -26,10 +28,18 @@ interface TokenBucketState {
 
 /**
  * Token bucket algorithm for bursty traffic with steady refill.
+ *
+ * @implements RateLimitAlgorithm
  */
 export class TokenBucketAlgorithm implements RateLimitAlgorithm {
   public readonly type: RateLimitAlgorithmType = 'token-bucket';
 
+  /**
+   * Create a token-bucket algorithm bound to a storage backend.
+   *
+   * @param storage - Storage backend for rate-limit state.
+   * @param config - Token-bucket configuration.
+   */
   public constructor(
     private readonly storage: RateLimitStorage,
     private readonly config: TokenBucketConfig,
@@ -37,6 +47,10 @@ export class TokenBucketAlgorithm implements RateLimitAlgorithm {
 
   /**
    * Record one attempt and return the current bucket status for this key.
+   *
+   * @param key - Storage key for the limiter.
+   * @returns Rate limit result for the current bucket.
+   * @throws Error when refillRate is non-positive.
    */
   public async consume(key: string): Promise<RateLimitResult> {
     const now = Date.now();
@@ -104,11 +118,23 @@ export class TokenBucketAlgorithm implements RateLimitAlgorithm {
     };
   }
 
+  /**
+   * Reset the stored key state for this limiter.
+   *
+   * @param key - Storage key to reset.
+   * @returns Resolves after the key is deleted.
+   */
   public async reset(key: string): Promise<void> {
     await this.storage.delete(key);
   }
 }
 
+/**
+ * Type guard for token-bucket state entries loaded from storage.
+ *
+ * @param value - Stored value to validate.
+ * @returns True when the value matches the TokenBucketState shape.
+ */
 function isTokenBucketState(value: unknown): value is TokenBucketState {
   if (!value || typeof value !== 'object') return false;
   const state = value as TokenBucketState;
@@ -120,6 +146,13 @@ function isTokenBucketState(value: unknown): value is TokenBucketState {
   );
 }
 
+/**
+ * Estimate a TTL window large enough to cover full bucket refills.
+ *
+ * @param capacity - Bucket capacity.
+ * @param refillRate - Tokens refilled per second.
+ * @returns TTL in milliseconds.
+ */
 function estimateBucketTtl(capacity: number, refillRate: number): number {
   if (refillRate <= 0) return 60_000;
   return Math.ceil((capacity / refillRate) * 1000 * 2);

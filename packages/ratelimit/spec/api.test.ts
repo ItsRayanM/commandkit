@@ -1,6 +1,8 @@
-﻿// API helper tests.
-//
-// Uses in-memory storage to keep exemption/reset tests isolated.
+﻿/**
+ * API helper tests.
+ *
+ * Uses in-memory storage to keep exemption/reset tests isolated.
+ */
 
 import { afterEach, describe, expect, test } from 'vitest';
 import { MemoryRateLimitStorage } from '../src/storage/memory';

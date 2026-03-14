@@ -1,7 +1,9 @@
-// Test helpers for ratelimit specs.
-//
-// Provides lightweight stubs for Discord and CommandKit so tests stay focused
-// on rate limit behavior without a live client.
+﻿/**
+ * Test helpers for ratelimit specs.
+ *
+ * Provides lightweight stubs for Discord and CommandKit so tests stay focused
+ * on rate limit behavior without a live client.
+ */
 
 import { Collection, Message } from 'discord.js';
 import { vi } from 'vitest';
@@ -19,7 +21,11 @@ export interface InteractionStubOptions {
 
 /**
  * Build an Interaction-like stub with only the fields the plugin reads.
+ *
  * Keeps tests fast without a live Discord client.
+ *
+ * @param options - Overrides for interaction fields used in tests.
+ * @returns Interaction stub matching the minimal plugin contract.
  */
 export function createInteractionStub(options: InteractionStubOptions = {}) {
   const interaction = {
@@ -61,6 +67,9 @@ export interface MessageStubOptions {
 
 /**
  * Build a Message-like stub with minimal fields used by rate limit logic.
+ *
+ * @param options - Overrides for message fields used in tests.
+ * @returns Message stub matching the minimal plugin contract.
  */
 export function createMessageStub(options: MessageStubOptions = {}) {
   const message = Object.create(Message.prototype) as Message & {
@@ -87,6 +96,9 @@ export function createMessageStub(options: MessageStubOptions = {}) {
 
 /**
  * Create a minimal CommandKit env with a store for plugin results.
+ *
+ * @param commandName - Command name to seed into the context.
+ * @returns Minimal CommandKit environment for plugin tests.
  */
 export function createEnv(commandName = 'ping') {
   return {
@@ -97,6 +109,9 @@ export function createEnv(commandName = 'ping') {
 
 /**
  * Create a runtime context with stubbed analytics and capture hooks.
+ *
+ * @param overrides - Optional overrides for command arrays.
+ * @returns Runtime context and stubbed helpers.
  */
 export function createRuntimeContext(
   overrides: {
@@ -129,6 +144,9 @@ export function createRuntimeContext(
 
 /**
  * Build a prepared command shape for plugin tests.
+ *
+ * @param options - Command metadata overrides.
+ * @returns Prepared command payload for plugin tests.
  */
 export function createPreparedCommand(options: {
   name?: string;
