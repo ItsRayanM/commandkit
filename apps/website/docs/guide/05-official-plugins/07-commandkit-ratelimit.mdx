@@ -56,8 +56,8 @@ The runtime plugin auto-loads `ratelimit.ts` or `ratelimit.js` on startup before
 ```mermaid
 graph TD
     A[App startup] --> B[Auto-load ratelimit.ts/js]
-    B --> C[configureRatelimit()]
-    C --> D[Runtime plugin activate()]
+    B --> C["configureRatelimit()"]
+    C --> D["Runtime plugin activate()"]
     D --> E[Resolve storage]
     E --> F[Resolve limiter config]
     F --> G[Consume algorithm]
@@ -283,7 +283,7 @@ graph TD
     A[DEFAULT_LIMITER] --> B[defaultLimiter]
     B --> C[Named limiter]
     C --> D[Command overrides]
-    D --> E[Role override (strategy)]
+    D --> E["Role override (strategy)"]
 ```
 
 Role limits are merged in this order, with later maps overriding earlier ones for the same role id:
@@ -365,7 +365,7 @@ graph TD
     B -- Yes --> C[Use consumeFixedWindow]
     B -- No --> D{incr?}
     D -- Yes --> E[Use incr]
-    D -- No --> F[get + set fallback (per-process lock)]
+    D -- No --> F["get + set fallback (per-process lock)"]
 ```
 
 ### Sliding window log
