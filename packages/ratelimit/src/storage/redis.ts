@@ -11,7 +11,7 @@ import type {
   SlidingWindowConsumeResult,
 } from '../types';
 
-const FIXED_WINDOW_SCRIPT = `
+const FIXED_WINDOW_SCRIPT = /* lua */ `
   local key = KEYS[1]
   local window = tonumber(ARGV[1])
   local count = redis.call('INCR', key)
@@ -23,7 +23,7 @@ const FIXED_WINDOW_SCRIPT = `
   return {count, ttl}
 `;
 
-const SLIDING_WINDOW_SCRIPT = `
+const SLIDING_WINDOW_SCRIPT = /* lua */ `
   local key = KEYS[1]
   local limit = tonumber(ARGV[1])
   local window = tonumber(ARGV[2])

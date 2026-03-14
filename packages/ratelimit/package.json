@@ -57,6 +57,7 @@
     "@types/ms": "^2.1.0",
     "commandkit": "workspace:*",
     "discord.js": "catalog:discordjs",
+    "directive-to-hof": "^0.0.3",
     "tsconfig": "workspace:*",
     "typescript": "catalog:build",
     "vitest": "^4.0.18"
