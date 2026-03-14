@@ -1,19 +1,45 @@
 # @commandkit/ratelimit
 
-Advanced rate limiting for CommandKit with multiple algorithms, queueing,
-role limits, multi-window policies, and temporary exemptions.
+`@commandkit/ratelimit` is the official CommandKit plugin for advanced rate limiting. It provides multi-window policies, role overrides, queueing, exemptions, and multiple algorithms while keeping command handlers lean.
+
+The `ratelimit()` factory returns two plugins in order: the compiler plugin for the "use ratelimit" directive and the runtime plugin that enforces limits. Runtime options must be configured before the runtime plugin activates.
+
+## Table of contents
+
+1. [Installation](#installation)
+2. [Setup](#setup)
+3. [Runtime configuration lifecycle](#runtime-configuration-lifecycle)
+4. [Basic usage](#basic-usage)
+5. [Configuration reference](#configuration-reference)
+6. [Limiter resolution and role strategy](#limiter-resolution-and-role-strategy)
+7. [Scopes and keying](#scopes-and-keying)
+8. [Algorithms](#algorithms)
+9. [Storage](#storage)
+10. [Queue mode](#queue-mode)
+11. [Violations and escalation](#violations-and-escalation)
+12. [Bypass and exemptions](#bypass-and-exemptions)
+13. [Responses, hooks, and events](#responses-hooks-and-events)
+14. [Resets and HMR](#resets-and-hmr)
+15. [Directive: `use ratelimit`](#directive-use-ratelimit)
+16. [Defaults and edge cases](#defaults-and-edge-cases)
+17. [Duration parsing](#duration-parsing)
+18. [Exports](#exports)
 
 ## Installation
+
+Install the ratelimit plugin to get started:
 
 ```bash
 npm install @commandkit/ratelimit
 ```
 
-## Quick start
+## Setup
 
-Create the auto-loaded `ratelimit.ts`/`ratelimit.js` file and call
-`configureRatelimit(...)` there so runtime settings are available before the
-plugin evaluates any commands:
+Add the ratelimit plugin to your CommandKit configuration and define a runtime config file.
+
+### Quick start
+
+Create an auto-loaded runtime config file (for example `ratelimit.ts`) and configure the default limiter:
 
 ```ts
 // ratelimit.ts
@@ -29,6 +55,8 @@ configureRatelimit({
 });
 ```
 
+Register the plugin in your config:
+
 ```ts
 // commandkit.config.ts
 import { defineConfig } from 'commandkit';
@@ -39,9 +67,69 @@ export default defineConfig({
 });
 ```
 
-The runtime plugin auto-loads `ratelimit.ts`/`ratelimit.js` on startup.
+The runtime plugin auto-loads `ratelimit.ts` or `ratelimit.js` on startup before commands execute.
 
-Enable rate limiting on a command:
+## Runtime configuration lifecycle
+
+### Runtime lifecycle diagram
+
+```mermaid
+graph TD
+    A[App startup] --> B[Auto-load ratelimit.ts/js]
+    B --> C[configureRatelimit()]
+    C --> D[Runtime plugin activate()]
+    D --> E[Resolve storage]
+    E --> F[Resolve limiter config]
+    F --> G[Consume algorithm]
+    G --> H[Aggregate result]
+    H --> I[Default response / hooks / events]
+```
+
+### `configureRatelimit` is required
+
+`RateLimitPlugin.activate()` throws if `configureRatelimit()` was not called. This is enforced to avoid silently running without your intended defaults.
+
+### How configuration is stored
+
+`configureRatelimit()` merges your config into an in-memory object and sets the configured flag. `getRateLimitConfig()` returns the current object, and `isRateLimitConfigured()` returns whether initialization has happened. If a runtime context is already active, `configureRatelimit()` updates it immediately.
+
+### Runtime storage selection
+
+Storage is resolved in this order:
+
+| Order | Source | Notes |
+| --- | --- | --- |
+| 1 | Limiter `storage` override | `RateLimitLimiterConfig.storage` for the command being executed. |
+| 2 | Plugin `storage` option | `RateLimitPluginOptions.storage`. |
+| 3 | Process default | Set via `setRateLimitStorage()` or `setDriver()`. |
+| 4 | Default memory storage | Used unless `initializeDefaultStorage` or `initializeDefaultDriver` is `false`. |
+
+If no storage is resolved and defaults are disabled, the plugin logs once and stores an empty result without limiting.
+
+### Runtime helpers
+
+These helpers are process-wide:
+
+| Helper | Purpose |
+| --- | --- |
+| `configureRatelimit` | Set runtime options and update active runtime state. |
+| `getRateLimitConfig` | Read the merged in-memory runtime config. |
+| `isRateLimitConfigured` | Check whether `configureRatelimit()` was called. |
+| `setRateLimitStorage` | Set the default storage for the process. |
+| `getRateLimitStorage` | Get the process default storage (or `null`). |
+| `setDriver` / `getDriver` | Aliases for `setRateLimitStorage` / `getRateLimitStorage`. |
+| `setRateLimitRuntime` | Set the active runtime context for APIs and directives. |
+| `getRateLimitRuntime` | Get the active runtime context (or `null`). |
+
+## Basic usage
+
+Use command metadata or the `use ratelimit` directive to enable rate limiting.
+This section focuses on command metadata; see the directive section for
+function-level usage.
+
+### Command metadata and enablement
+
+Enable rate limiting by setting `metadata.ratelimit`:
 
 ```ts
 export const metadata = {
@@ -54,255 +142,277 @@ export const metadata = {
 };
 ```
 
-## `ratelimit()` options
+`metadata.ratelimit` can be one of:
 
-The `ratelimit()` factory returns the compiler and runtime plugins and accepts:
+| Value | Meaning |
+| --- | --- |
+| `false` or `undefined` | Plugin does nothing for this command. |
+| `true` | Enable rate limiting using resolved defaults. |
+| `RateLimitCommandConfig` | Enable rate limiting with command-level overrides. |
 
-- `compiler`: Options for the `"use ratelimit"` directive transformer.
+If `env.context` is missing in the execution environment, the plugin skips rate limiting.
 
-Runtime options are configured via `configureRatelimit()`.
-
-Example:
+### Named limiter example
 
 ```ts
-ratelimit({
-  compiler: { enabled: true },
+configureRatelimit({
+  limiters: {
+    heavy: { maxRequests: 1, interval: '10s', algorithm: 'fixed-window' },
+  },
 });
 ```
 
-## How keys and scopes work
-
-Scopes determine how keys are generated:
-
-- `user` -> `rl:user:{userId}:{commandName}`
-- `guild` -> `rl:guild:{guildId}:{commandName}`
-- `channel` -> `rl:channel:{channelId}:{commandName}`
-- `global` -> `rl:global:{commandName}`
-- `user-guild` -> `rl:user:{userId}:guild:{guildId}:{commandName}`
-- `custom` -> `keyResolver(ctx, command, source)`
-
-If `keyPrefix` is provided, it is prepended before the `rl:` prefix:
-
-- `keyPrefix: 'prod:'` -> `prod:rl:user:{userId}:{commandName}`
-
-Multi-window limits append a suffix:
-
-- `:w:{windowId}` (for example `rl:user:123:ping:w:short`)
-
-For `custom` scope you must provide `keyResolver`:
-
 ```ts
-import type { RateLimitKeyResolver } from '@commandkit/ratelimit';
-
-const keyResolver: RateLimitKeyResolver = (ctx, command, source) => {
-  return `custom:${ctx.commandName}:${source.user?.id ?? 'unknown'}`;
+export const metadata = {
+  ratelimit: {
+    limiter: 'heavy',
+    scope: 'user',
+  },
 };
 ```
 
-If `keyResolver` returns a falsy value, the limiter is skipped for that scope.
+## Configuration reference
 
-Exemption keys use:
+### RateLimitPluginOptions
 
-- `rl:exempt:{scope}:{id}` (plus optional `keyPrefix`).
+| Field | Type | Default or resolution | Notes |
+| --- | --- | --- | --- |
+| `defaultLimiter` | `RateLimitLimiterConfig` | `DEFAULT_LIMITER` when unset | Base limiter for all commands and directives. |
+| `limiters` | `Record<string, RateLimitLimiterConfig>` | `undefined` | Named limiter presets. |
+| `storage` | `RateLimitStorageConfig` | `undefined` | Resolved before default storage. |
+| `keyPrefix` | `string` | `undefined` | Prepended before `rl:`. |
+| `keyResolver` | `RateLimitKeyResolver` | `undefined` | Used for `custom` scope when the limiter does not override it. |
+| `bypass` | `RateLimitBypassOptions` | `undefined` | Permanent allowlists and optional check. |
+| `hooks` | `RateLimitHooks` | `undefined` | Lifecycle callbacks. |
+| `onRateLimited` | `RateLimitResponseHandler` | `undefined` | Overrides default reply. |
+| `queue` | `RateLimitQueueOptions` | `undefined` | If any queue config exists, `enabled` defaults to `true`. |
+| `roleLimits` | `Record<string, RateLimitLimiterConfig>` | `undefined` | Base role limits. |
+| `roleLimitStrategy` | `RateLimitRoleLimitStrategy` | `highest` when resolving | Used when multiple roles match. |
+| `initializeDefaultStorage` | `boolean` | `true` | Disable to prevent memory fallback. |
+| `initializeDefaultDriver` | `boolean` | `true` | Alias for `initializeDefaultStorage`. |
 
-## Plugin options (RateLimitPluginOptions)
+### RateLimitLimiterConfig
 
-- `defaultLimiter`: Default limiter settings used when a command does not specify a limiter.
-- `limiters`: Named limiter presets referenced by command metadata using `limiter: 'name'`.
-- `storage`: Storage driver or `{ driver }` wrapper used for rate limit state.
-- `keyPrefix`: Optional prefix prepended to all keys.
-- `keyResolver`: Resolver used for `custom` scope keys.
-- `bypass`: Bypass rules for users, roles, guilds, or a custom check.
-- `hooks`: Lifecycle hooks for allowed, limited, reset, violation, and storage error events.
-- `onRateLimited`: Custom response handler that replaces the default reply.
-- `queue`: Queue settings for retrying instead of rejecting.
-- `roleLimits`: Role-specific limiter overrides.
-- `roleLimitStrategy`: `highest`, `lowest`, or `first` to resolve matching role limits.
-- `initializeDefaultStorage`: When true, initializes in-memory storage if no storage is set.
-- `initializeDefaultDriver`: Alias for `initializeDefaultStorage`.
+| Field | Type | Default or resolution | Notes |
+| --- | --- | --- | --- |
+| `maxRequests` | `number` | `10` when missing or `<= 0` | Used by fixed and sliding windows. |
+| `interval` | `DurationLike` | `60s` when missing or invalid | Parsed and clamped to `>= 1ms`. |
+| `scope` | `RateLimitScope` or `RateLimitScope[]` | `user` | Arrays are deduplicated. |
+| `algorithm` | `RateLimitAlgorithmType` | `fixed-window` | Unknown values fall back to fixed-window. |
+| `burst` | `number` | `maxRequests` when missing or `<= 0` | Capacity for token or leaky buckets. |
+| `refillRate` | `number` | `maxRequests / intervalSeconds` | Must be `> 0` for token bucket. |
+| `leakRate` | `number` | `maxRequests / intervalSeconds` | Must be `> 0` for leaky bucket. |
+| `keyResolver` | `RateLimitKeyResolver` | `undefined` | Used only for `custom` scope. |
+| `keyPrefix` | `string` | `undefined` | Overrides plugin prefix for this limiter. |
+| `storage` | `RateLimitStorageConfig` | `undefined` | Overrides storage for this limiter. |
+| `violations` | `ViolationOptions` | `undefined` | Enables escalation unless `escalate` is `false`. |
+| `queue` | `RateLimitQueueOptions` | `undefined` | Overrides queue settings at this layer. |
+| `windows` | `RateLimitWindowConfig[]` | `undefined` | Enables multi-window behavior. |
+| `roleLimits` | `Record<string, RateLimitLimiterConfig>` | `undefined` | Role overrides at this layer. |
+| `roleLimitStrategy` | `RateLimitRoleLimitStrategy` | `highest` when resolving | Used when role limits match. |
 
-## Limiter options (RateLimitLimiterConfig)
+### RateLimitWindowConfig
 
-- `maxRequests`: Requests allowed per interval (default 10).
-- `interval`: Duration for the limit window (number in ms or string).
-- `scope`: Single scope or list of scopes.
-- `algorithm`: `fixed-window`, `sliding-window`, `token-bucket`, `leaky-bucket`.
-- `burst`: Capacity for token/leaky bucket (defaults to `maxRequests`).
-- `refillRate`: Tokens per second for token bucket (defaults to `maxRequests / intervalSeconds`).
-- `leakRate`: Tokens per second for leaky bucket (defaults to `maxRequests / intervalSeconds`).
-- `keyResolver`: Custom key resolver for `custom` scope.
-- `keyPrefix`: Prefix override for this limiter.
-- `storage`: Storage override for this limiter.
-- `violations`: Escalation settings for repeated limits.
-- `queue`: Queue override for this limiter.
-- `windows`: Multi-window configuration.
-- `roleLimits`: Role-specific overrides scoped to this limiter.
-- `roleLimitStrategy`: Role limit resolution strategy scoped to this limiter.
+| Field | Type | Default or resolution | Notes |
+| --- | --- | --- | --- |
+| `id` | `string` | `w1`, `w2`, ... | Auto-generated if empty or missing. |
+| `maxRequests` | `number` | Inherits from base limiter | Applies only to this window. |
+| `interval` | `DurationLike` | Inherits from base limiter | Parsed like the base limiter. |
+| `algorithm` | `RateLimitAlgorithmType` | Inherits from base limiter | Usually keep consistent across windows. |
+| `burst` | `number` | Inherits from base limiter | Used for token or leaky buckets. |
+| `refillRate` | `number` | Inherits from base limiter | Must be `> 0` for token bucket. |
+| `leakRate` | `number` | Inherits from base limiter | Must be `> 0` for leaky bucket. |
+| `violations` | `ViolationOptions` | Inherits from base limiter | Overrides escalation for this window. |
 
-## Command metadata options (RateLimitCommandConfig)
+### RateLimitQueueOptions
 
-Command metadata extends limiter options and adds:
+| Field | Type | Default or resolution | Notes |
+| --- | --- | --- | --- |
+| `enabled` | `boolean` | `true` when any queue config exists | Otherwise `false`. |
+| `maxSize` | `number` | `3` and clamped to `>= 1` | Queue size is pending plus running. |
+| `timeout` | `DurationLike` | `30s` and clamped to `>= 1ms` | Per queued task. |
+| `deferInteraction` | `boolean` | `true` unless explicitly `false` | Only used for interactions. |
+| `ephemeral` | `boolean` | `true` unless explicitly `false` | Applies to deferred replies. |
+| `concurrency` | `number` | `1` and clamped to `>= 1` | Per queue key. |
 
-- `limiter`: Name of a limiter defined in `limiters`.
+### ViolationOptions
 
-## Resolution order
+| Field | Type | Default or resolution | Notes |
+| --- | --- | --- | --- |
+| `escalate` | `boolean` | `true` when `violations` is set | Set `false` to disable escalation. |
+| `maxViolations` | `number` | `5` | Maximum escalation steps. |
+| `escalationMultiplier` | `number` | `2` | Multiplies cooldown per repeated violation. |
+| `resetAfter` | `DurationLike` | `1h` | TTL for violation state. |
 
-Limiter resolution order (later overrides earlier):
+### RateLimitCommandConfig
 
-- Built-in defaults (`DEFAULT_LIMITER`).
-- `defaultLimiter`.
-- Named limiter (if `metadata.ratelimit.limiter` is set).
-- Command metadata overrides.
-- Role limit overrides (when matched).
+`RateLimitCommandConfig` extends `RateLimitLimiterConfig` and adds:
+
+| Field | Type | Default or resolution | Notes |
+| --- | --- | --- | --- |
+| `limiter` | `string` | `undefined` | References a named limiter in `limiters`. |
+
+### Result shapes
+
+RateLimitStoreValue:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `limited` | `boolean` | `true` if any scope or window was limited. |
+| `remaining` | `number` | Minimum remaining across all results. |
+| `resetAt` | `number` | Latest reset timestamp across all results. |
+| `retryAfter` | `number` | Max retry delay across limited results. |
+| `results` | `RateLimitResult[]` | Individual results per scope and window. |
+
+RateLimitResult:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `key` | `string` | Storage key used for the limiter. |
+| `scope` | `RateLimitScope` | Scope applied for the limiter. |
+| `algorithm` | `RateLimitAlgorithmType` | Algorithm used for the limiter. |
+| `windowId` | `string` | Present for multi-window limits. |
+| `limited` | `boolean` | Whether this limiter hit its limit. |
+| `remaining` | `number` | Remaining requests or capacity. |
+| `resetAt` | `number` | Absolute reset timestamp in ms. |
+| `retryAfter` | `number` | Delay until retry is allowed, in ms. |
+| `limit` | `number` | `maxRequests` for fixed and sliding, `burst` for token and leaky buckets. |
+
+## Limiter resolution and role strategy
+
+Limiter configuration is layered in this exact order, with later layers overriding earlier ones:
+
+| Order | Source | Notes |
+| --- | --- | --- |
+| 1 | `DEFAULT_LIMITER` | Base defaults. |
+| 2 | `defaultLimiter` | Runtime defaults. |
+| 3 | Named limiter | When `metadata.ratelimit.limiter` is set. |
+| 4 | Command overrides | `metadata.ratelimit` config. |
+| 5 | Role override | Selected by role strategy. |
+
+### Limiter resolution diagram
+
+```mermaid
+graph TD
+    A[DEFAULT_LIMITER] --> B[defaultLimiter]
+    B --> C[Named limiter]
+    C --> D[Command overrides]
+    D --> E[Role override (strategy)]
+```
+
+Role limits are merged in this order, with later maps overriding earlier ones for the same role id:
+
+| Order | Source |
+| --- | --- |
+| 1 | Plugin `roleLimits` |
+| 2 | `defaultLimiter.roleLimits` |
+| 3 | Named limiter `roleLimits` |
+| 4 | Command `roleLimits` |
+
+Role strategies:
+
+| Strategy | Selection rule |
+| --- | --- |
+| `highest` | Picks the role with the highest request rate (`maxRequests / intervalMs`). |
+| `lowest` | Picks the role with the lowest request rate. |
+| `first` | Uses insertion order of the merged role limits object. |
+
+For multi-window limiters, the score uses the minimum rate across windows.
+
+## Scopes and keying
+
+Supported scopes:
+
+| Scope | Required IDs | Key format (without `keyPrefix`) | Skip behavior |
+| --- | --- | --- | --- |
+| `user` | `userId` | `rl:user:{userId}:{commandName}` | Skips if `userId` is missing. |
+| `guild` | `guildId` | `rl:guild:{guildId}:{commandName}` | Skips if `guildId` is missing. |
+| `channel` | `channelId` | `rl:channel:{channelId}:{commandName}` | Skips if `channelId` is missing. |
+| `global` | none | `rl:global:{commandName}` | Never skipped. |
+| `user-guild` | `userId`, `guildId` | `rl:user:{userId}:guild:{guildId}:{commandName}` | Skips if either id is missing. |
+| `custom` | `keyResolver` | `keyResolver(ctx, command, source)` | Skips if resolver is missing or returns falsy. |
+
+Keying notes:
+
+- `DEFAULT_KEY_PREFIX` is always included in the base format.
+- `keyPrefix` is concatenated before `rl:` as-is, so include a trailing separator if you want one.
+- Multi-window limits append `:w:{windowId}`.
+
+### Exemption keys
+
+Temporary exemptions are stored under `rl:exempt:{scope}:{id}` (plus optional `keyPrefix`).
+
+| Exemption scope | Key format | Notes |
+| --- | --- | --- |
+| `user` | `rl:exempt:user:{userId}` | Resolved from the source user id. |
+| `guild` | `rl:exempt:guild:{guildId}` | Resolved from the guild id. |
+| `role` | `rl:exempt:role:{roleId}` | Resolved from all member roles. |
+| `channel` | `rl:exempt:channel:{channelId}` | Resolved from the channel id. |
+| `category` | `rl:exempt:category:{categoryId}` | Resolved from the parent category id. |
 
 ## Algorithms
 
+### Algorithm matrix
+
+| Algorithm | Required config | Storage requirements | `limit` value | Notes |
+| --- | --- | --- | --- | --- |
+| `fixed-window` | `maxRequests`, `interval` | `consumeFixedWindow` or `incr` or `get` and `set` | `maxRequests` | Fallback uses per-process lock and optimistic versioning. |
+| `sliding-window` | `maxRequests`, `interval` | `consumeSlidingWindowLog` or `zRemRangeByScore` + `zCard` + `zAdd` | `maxRequests` | Throws if sorted-set support is missing. |
+| `token-bucket` | `burst`, `refillRate` | `get` and `set` | `burst` | Throws if `refillRate <= 0`. |
+| `leaky-bucket` | `burst`, `leakRate` | `get` and `set` | `burst` | Throws if `leakRate <= 0`. |
+
 ### Fixed window
 
-- Uses a counter per interval.
-- Required: `maxRequests`, `interval`.
-- Storage: `consumeFixedWindow` or `incr`, otherwise falls back to `get/set`.
+Execution path:
+
+1. If `consumeFixedWindow` exists, it is used.
+2. Else if `incr` exists, it is used.
+3. Else a fallback uses `get` and `set` with a per-process lock.
+
+The limiter is considered limited when `count > maxRequests`. The fallback path retries up to five times with optimistic versioning and is serialized only within the current process.
+
+#### Fixed window fallback diagram
+
+```mermaid
+graph TD
+    A[Consume fixed-window] --> B{consumeFixedWindow?}
+    B -- Yes --> C[Use consumeFixedWindow]
+    B -- No --> D{incr?}
+    D -- Yes --> E[Use incr]
+    D -- No --> F[get + set fallback (per-process lock)]
+```
 
 ### Sliding window log
 
-- Tracks timestamps in a sorted set.
-- Required: `maxRequests`, `interval`.
-- Storage: `consumeSlidingWindowLog` or `zAdd`, `zRemRangeByScore`, `zCard` and optional `zRangeByScore`.
-- If sorted-set ops are missing, it throws an error.
-- The non-atomic sorted-set fallback can race under concurrency; implement `consumeSlidingWindowLog` for strict enforcement.
+Execution path:
+
+1. If `consumeSlidingWindowLog` exists, it is used (atomic).
+2. Else a sorted-set fallback uses `zRemRangeByScore`, `zCard`, and `zAdd`.
+
+If sorted-set methods are missing, the algorithm throws. If `zRangeByScore` is available, it is used to compute an accurate oldest timestamp for `resetAt`; otherwise `resetAt` defaults to `now + window`. The fallback is serialized per process but is not atomic across processes.
+
+#### Sliding window fallback diagram
+
+```mermaid
+graph TD
+    A[Consume sliding-window] --> B{consumeSlidingWindowLog?}
+    B -- Yes --> C[Use consumeSlidingWindowLog]
+    B -- No --> D{zset methods?}
+    D -- No --> E[Throw error]
+    D -- Yes --> F[zRemRangeByScore + zCard + zAdd fallback]
+```
 
 ### Token bucket
 
-- Refills tokens continuously.
-- Required: `burst` (capacity), `refillRate` (tokens/sec).
-- Storage: `get/set`.
-- `refillRate` must be greater than 0.
+Token bucket uses a stored `tokens` and `lastRefill` state. On each consume, tokens refill based on elapsed time and `refillRate`. If the bucket has fewer than one token, the request is limited and `retryAfter` is computed from the time required to refill one token.
 
 ### Leaky bucket
 
-- Leaks tokens continuously.
-- Required: `burst` (capacity), `leakRate` (tokens/sec).
-- Storage: `get/set`.
-- `leakRate` must be greater than 0.
+Leaky bucket uses a stored `level` and `lastLeak` state. Each request adds one token, and the bucket drains at `leakRate`. If adding would exceed `capacity`, the request is limited and `retryAfter` is computed from the time required to drain the overflow.
 
-## Storage drivers
+### Multi-window limits
 
-### MemoryRateLimitStorage
-
-- In-memory store with TTL support.
-- Implements `consumeFixedWindow`, `consumeSlidingWindowLog`, sorted-set ops,
-  prefix/pattern deletes, and key listing.
-- Not shared across processes (single-node only).
-
-### RedisRateLimitStorage
-
-- Uses Redis with Lua scripts for fixed and sliding windows.
-- Stores values as JSON.
-- Supports `deleteByPattern`, `deleteByPrefix`, and `keysByPrefix` via `SCAN`.
-- `@commandkit/ratelimit/redis` also re-exports `RedisOptions` from `ioredis`.
-
-### FallbackRateLimitStorage
-
-- Wraps a primary and secondary storage.
-- On failure, falls back to the secondary and logs at most once per cooldown window.
-- Options: `cooldownMs` (default 30s).
-
-Disable the default memory storage:
-
-```ts
-configureRatelimit({
-  initializeDefaultStorage: false,
-  // or: initializeDefaultDriver: false
-});
-```
-
-## Storage interface and requirements
-
-`storage` accepts either a `RateLimitStorage` instance or `{ driver }`.
-
-Required methods:
-
-- `get`, `set`, `delete`.
-
-Optional methods used by features:
-
-- `incr` and `consumeFixedWindow` for fixed-window efficiency.
-- `zAdd`, `zRemRangeByScore`, `zCard`, `zRangeByScore`, `consumeSlidingWindowLog` for sliding window.
-- `ttl`, `expire` for expiry visibility.
-- `deleteByPrefix`, `deleteByPattern`, `keysByPrefix` for resets and exemption listing.
-
-## Queue mode
-
-Queue mode retries commands instead of rejecting immediately:
-
-```ts
-configureRatelimit({
-  queue: {
-    enabled: true,
-    maxSize: 3,
-    timeout: '30s',
-    deferInteraction: true,
-    ephemeral: true,
-    concurrency: 1,
-  },
-});
-```
- 
-Queue options:
-
-- `enabled`
-- `maxSize`
-- `timeout`
-- `deferInteraction`
-- `ephemeral`
-- `concurrency`
-
-If any queue config is provided and `enabled` is unset, it defaults to `true`.
-
-Queue size counts pending plus running tasks. If the queue is full, the plugin
-falls back to immediate rate-limit handling.
-
-Queue defaults:
-
-- `maxSize`: 3
-- `timeout`: 30s
-- `deferInteraction`: true
-- `ephemeral`: true
-- `concurrency`: 1
-
-`deferInteraction` only applies to interactions (messages are ignored).
-
-`maxSize`, `timeout`, and `concurrency` are clamped to a minimum of 1.
-
-Queue resolution order is (later overrides earlier):
-
-- `queue`
-- `defaultLimiter.queue`
-- `named limiter queue`
-- `command metadata queue`
-- `role limit queue`
-
-## Role limits
-
-Role limits override the base limiter if the user has a matching role:
-
-```ts
-configureRatelimit({
-  roleLimits: {
-    'ROLE_ID_1': { maxRequests: 30, interval: '1m' },
-    'ROLE_ID_2': { maxRequests: 5, interval: '1m' },
-  },
-  roleLimitStrategy: 'highest',
-});
-```
-
-If no strategy is provided, `roleLimitStrategy` defaults to `highest`.
-
-Role scoring is based on `maxRequests / intervalMs` (minimum across windows).
-
-## Multi-window limits
-
-Use `windows` to enforce multiple windows at the same time:
+Use `windows` to enforce multiple windows simultaneously:
 
 ```ts
 configureRatelimit({
@@ -317,85 +427,180 @@ configureRatelimit({
 });
 ```
 
-If a window `id` is omitted, it auto-generates `w1`, `w2`, and so on.
+If a window `id` is omitted, the plugin generates `w1`, `w2`, and so on. Window ids are part of the storage key and appear in results.
+
+## Storage
+
+### Storage interface
+
+Required methods:
+
+| Method | Used by | Notes |
+| --- | --- | --- |
+| `get` | All algorithms | Returns stored value or `null`. |
+| `set` | All algorithms | Optional `ttlMs` controls expiry. |
+| `delete` | Resets and algorithm resets | Removes stored state. |
+
+Optional methods and features:
+
+| Method | Feature | Notes |
+| --- | --- | --- |
+| `consumeFixedWindow` | Fixed-window atomic consume | Used before `incr` and fallback. |
+| `incr` | Fixed-window efficiency | Returns count and TTL. |
+| `consumeSlidingWindowLog` | Sliding-window atomic consume | Preferred over sorted-set fallback. |
+| `zAdd` / `zRemRangeByScore` / `zCard` | Sliding-window fallback | Required when `consumeSlidingWindowLog` is absent. |
+| `zRangeByScore` | Sliding-window reset accuracy | Improves `resetAt` computation. |
+| `ttl` | Exemption listing | Used for `expiresInMs`. |
+| `expire` | Sliding-window fallback | Keeps sorted-set keys from growing indefinitely. |
+| `deleteByPrefix` / `deleteByPattern` | Resets | Required by `resetAllRateLimits` and HMR. |
+| `keysByPrefix` | Exemption listing | Required for listing without a specific id. |
+
+### Capability matrix
+
+| Feature | Requires | Memory | Redis | Fallback |
+| --- | --- | --- | --- | --- |
+| Fixed-window atomic consume | `consumeFixedWindow` | Yes | Yes | Conditional (both storages) |
+| Fixed-window `incr` | `incr` | Yes | Yes | Conditional (both storages) |
+| Sliding-window atomic consume | `consumeSlidingWindowLog` | Yes | Yes | Conditional (both storages) |
+| Sliding-window fallback | `zAdd` + `zRemRangeByScore` + `zCard` | Yes | Yes | Conditional (both storages) |
+| TTL visibility | `ttl` | Yes | Yes | Conditional (both storages) |
+| Prefix or pattern deletes | `deleteByPrefix` or `deleteByPattern` | Yes | Yes | Conditional (both storages) |
+| Exemption listing | `keysByPrefix` | Yes | Yes | Conditional (both storages) |
+
+### Capability overview diagram
+
+```mermaid
+graph TD
+    A[Storage API] --> B[Required: get / set / delete]
+    A --> C[Optional methods]
+    C --> D[Fixed window atomic: consumeFixedWindow / incr]
+    C --> E[Sliding window atomic: consumeSlidingWindowLog]
+    C --> F[Sliding window fallback: zAdd + zRemRangeByScore + zCard]
+    C --> G[Listing & TTL: keysByPrefix / ttl]
+    C --> H[Bulk reset: deleteByPrefix / deleteByPattern]
+    I[Fallback storage] --> J[Uses primary + secondary]
+    J --> K[Each optional method must exist on both]
+```
+
+### Memory storage
+
+```ts
+import { MemoryRateLimitStorage, setRateLimitStorage } from '@commandkit/ratelimit';
+
+setRateLimitStorage(new MemoryRateLimitStorage());
+```
+
+Notes:
+
+- In-memory only; not safe for multi-process deployments.
+- Implements TTL and sorted-set helpers.
+- `deleteByPattern` supports a simple `*` wildcard, not full glob syntax.
+
+### Redis storage
+
+```ts
+import { RedisRateLimitStorage } from '@commandkit/ratelimit/redis';
+import { setRateLimitStorage } from '@commandkit/ratelimit';
+
+setRateLimitStorage(
+  new RedisRateLimitStorage({ host: 'localhost', port: 6379 }),
+);
+```
+
+Notes:
+
+- Stores values as JSON.
+- Uses Lua scripts for atomic fixed and sliding windows.
+- Uses `SCAN` for prefix and pattern deletes and listing.
+
+### Fallback storage
+
+```ts
+import { FallbackRateLimitStorage } from '@commandkit/ratelimit/fallback';
+import { MemoryRateLimitStorage } from '@commandkit/ratelimit/memory';
+import { RedisRateLimitStorage } from '@commandkit/ratelimit/redis';
+import { setRateLimitStorage } from '@commandkit/ratelimit';
+
+const primary = new RedisRateLimitStorage({ host: 'localhost', port: 6379 });
+const secondary = new MemoryRateLimitStorage();
+
+setRateLimitStorage(new FallbackRateLimitStorage(primary, secondary));
+```
+
+Notes:
+
+- Every optional method must exist on both storages or the fallback wrapper throws.
+- Primary errors are logged at most once per `cooldownMs` window (default 30s).
+
+## Queue mode
+
+Queue mode retries commands instead of rejecting immediately.
+
+### Queue defaults and clamps
+
+| Field | Default | Clamp | Notes |
+| --- | --- | --- | --- |
+| `enabled` | `true` if any queue config exists | n/a | Otherwise `false`. |
+| `maxSize` | `3` | `>= 1` | Queue size is pending plus running. |
+| `timeout` | `30s` | `>= 1ms` | Per queued task. |
+| `deferInteraction` | `true` | n/a | Only applies to interactions. |
+| `ephemeral` | `true` | n/a | Applies to deferred replies. |
+| `concurrency` | `1` | `>= 1` | Per queue key. |
+
+### Queue flow
+
+1. Rate limit is evaluated and an aggregate result is computed.
+2. If limited and queueing is enabled, the plugin tries to enqueue.
+3. If the queue is full, it falls back to immediate rate-limit handling.
+4. When queued, the interaction is deferred if it is repliable and not already replied or deferred.
+5. The queued task waits `retryAfter`, then re-checks the limiter; if still limited it waits at least 250ms and retries until timeout.
+
+### Queue flow diagram
+
+```mermaid
+graph TD
+    A[Evaluate limiter] --> B{Limited?}
+    B -- No --> C[Allow command]
+    B -- Yes --> D{Queue enabled?}
+    D -- No --> E[Rate-limit response]
+    D -- Yes --> F{Queue has capacity?}
+    F -- No --> E
+    F -- Yes --> G[Enqueue + defer if repliable]
+    G --> H[Wait retryAfter]
+    H --> I{Still limited?}
+    I -- No --> C
+    I -- Yes --> J[Wait >= 250ms]
+    J --> K{Timed out?}
+    K -- No --> H
+    K -- Yes --> E
+```
 
 ## Violations and escalation
 
-Escalate cooldowns after repeated rate limit violations:
+Violation escalation is stored under `violation:{key}` and uses these defaults:
 
-```ts
-configureRatelimit({
-  defaultLimiter: {
-    maxRequests: 1,
-    interval: '10s',
-    violations: {
-      maxViolations: 5,
-      escalationMultiplier: 2,
-      resetAfter: '1h',
-    },
-  },
-});
-```
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `maxViolations` | `5` | Maximum escalation steps. |
+| `escalationMultiplier` | `2` | Multiplier per repeated violation. |
+| `resetAfter` | `1h` | TTL for violation state. |
+| `escalate` | `true` when `violations` is set | Set `false` to disable escalation. |
 
-If an escalation cooldown extends beyond the normal reset, the plugin
-uses the longer cooldown.
+Formula:
 
-Violation defaults and flags:
+`cooldown = baseRetryAfter * multiplier^(count - 1)`
 
-- `escalate`: Defaults to true when `violations` is set. Set `false` to disable escalation.
-- `maxViolations`: Default 5.
-- `escalationMultiplier`: Default 2.
-- `resetAfter`: Default 1h.
+If escalation produces a later `resetAt` than the algorithm returned, the result is updated so `resetAt` and `retryAfter` stay accurate.
 
-## Hooks
+## Bypass and exemptions
 
-```ts
-configureRatelimit({
-  hooks: {
-    onAllowed: ({ key, result }) => {
-      console.log('allowed', key, result.remaining);
-    },
-    onRateLimited: ({ key, result }) => {
-      console.log('limited', key, result.retryAfter);
-    },
-    onViolation: (key, count) => {
-      console.log('violation', key, count);
-    },
-    onReset: (key) => {
-      console.log('reset', key);
-    },
-    onStorageError: (error, fallbackUsed) => {
-      console.error('storage error', error, fallbackUsed);
-    },
-  },
-});
-```
+Bypass order is always:
 
-## Analytics events
+1. `bypass.userIds`, `bypass.guildIds`, and `bypass.roleIds`.
+2. Temporary exemptions stored in storage.
+3. `bypass.check(source)`.
 
-The runtime plugin emits analytics events (if analytics is configured):
-
-- `ratelimit_allowed`
-- `ratelimit_hit`
-- `ratelimit_violation`
-
-## Events
-
-Listen to runtime rate-limit events via CommandKit events:
-
-```ts
-commandkit.events
-  .to('ratelimits')
-  .on('ratelimited', ({ key, result, source, aggregate, commandName, queued }) => {
-    console.log('ratelimited', key, commandName, queued, aggregate.retryAfter);
-  });
-```
-
-In CommandKit apps, you can register the listener via the events router by
-placing a handler under `src/app/events/(ratelimits)/ratelimited/` (for example
-`logger.ts`).
-
-## Bypass rules
+Bypass example:
 
 ```ts
 configureRatelimit({
@@ -408,144 +613,116 @@ configureRatelimit({
 });
 ```
 
-## Custom rate-limited response
-
-Override the default ephemeral cooldown reply:
+Temporary exemptions:
 
 ```ts
-import type { RateLimitStoreValue } from '@commandkit/ratelimit';
-
-configureRatelimit({
-  onRateLimited: async (ctx, info: RateLimitStoreValue) => {
-    await ctx.reply(`Cooldown: ${Math.ceil(info.retryAfter / 1000)}s`);
-  },
-});
-```
-
-## Temporary exemptions
-
-```ts
-import {
-  grantRateLimitExemption,
-  revokeRateLimitExemption,
-  listRateLimitExemptions,
-} from '@commandkit/ratelimit';
+import { grantRateLimitExemption } from '@commandkit/ratelimit';
 
 await grantRateLimitExemption({
   scope: 'user',
   id: 'USER_ID',
   duration: '1h',
 });
-
-await revokeRateLimitExemption({
-  scope: 'user',
-  id: 'USER_ID',
-});
-
-const exemptions = await listRateLimitExemptions({
-  scope: 'user',
-  id: 'USER_ID',
-});
 ```
 
-All exemption helpers accept an optional `keyPrefix`.
+Listing behavior:
 
-Listing notes:
+- `listRateLimitExemptions({ scope, id })` reads a single key directly.
+- `listRateLimitExemptions({ scope })` scans by prefix and requires `keysByPrefix`.
+- `expiresInMs` is `null` when `ttl` is not supported.
 
-- `listRateLimitExemptions({ scope, id })` checks a single key directly.
-- `listRateLimitExemptions({ scope })` scans by prefix if supported.
-- `limit` caps the number of results.
-- `expiresInMs` is `null` if the storage does not support `ttl`.
+## Responses, hooks, and events
 
-Supported exemption scopes:
+### Default response behavior
 
-- `user`
-- `guild`
-- `role`
-- `channel`
-- `category`
+| Source | Conditions | Action |
+| --- | --- | --- |
+| Message | Channel is sendable | `reply()` with cooldown embed. |
+| Interaction | Repliable and not replied/deferred | `reply()` with ephemeral cooldown embed. |
+| Interaction | Repliable and already replied/deferred | `followUp()` with ephemeral cooldown embed. |
+| Interaction | Not repliable | No response. |
 
-## Runtime helpers and API
+The default embed title is `:hourglass_flowing_sand: You are on cooldown` and the description uses a relative timestamp based on `resetAt`.
 
-### Runtime configuration
+### Hooks
+
+| Hook | Called when | Notes |
+| --- | --- | --- |
+| `onAllowed` | Command is allowed | Receives the first result. |
+| `onRateLimited` | Command is limited | Receives the first limited result. |
+| `onViolation` | A violation is recorded | Receives key and violation count. |
+| `onReset` | `resetRateLimit` succeeds | Not called by `resetAllRateLimits`. |
+| `onStorageError` | Storage operation fails | `fallbackUsed` is `false` in runtime plugin paths. |
+
+### Analytics events
+
+The runtime plugin calls `ctx.commandkit.analytics.track(...)` with:
+
+| Event name | When |
+| --- | --- |
+| `ratelimit_allowed` | After an allowed consume. |
+| `ratelimit_hit` | After a limited consume. |
+| `ratelimit_violation` | When escalation records a violation. |
+
+### Event bus
+
+A `ratelimited` event is emitted on the `ratelimits` channel:
 
 ```ts
-import { configureRatelimit } from '@commandkit/ratelimit';
-
-configureRatelimit({
-  defaultLimiter: { maxRequests: 5, interval: '1m' },
-});
+commandkit.events
+  .to('ratelimits')
+  .on('ratelimited', ({ key, result, source, aggregate, commandName, queued }) => {
+    console.log(key, commandName, queued, aggregate.retryAfter);
+  });
 ```
 
-Use `getRateLimitConfig()` to read the active configuration and
-`isRateLimitConfigured()` to guard flows that depend on runtime setup.
+Payload fields include `key`, `result`, `source`, `aggregate`, `commandName`, and `queued`.
 
-### Storage helpers
+## Resets and HMR
 
-```ts
-import {
-  setRateLimitStorage,
-  getRateLimitStorage,
-  setDriver,
-  getDriver,
-} from '@commandkit/ratelimit';
-```
+### `resetRateLimit`
 
-### Runtime access
+`resetRateLimit` clears the base key, its `violation:` key, and any window variants. It accepts either a raw `key` or a scope-derived key.
 
-```ts
-import { getRateLimitRuntime, setRateLimitRuntime } from '@commandkit/ratelimit';
-```
+| Mode | Required params | Notes |
+| --- | --- | --- |
+| Direct | `key` | Resets `key`, `violation:key`, and window variants. |
+| Scoped | `scope` + `commandName` + required ids | Throws if identifiers are missing. |
 
-### Accessing results inside commands
+### `resetAllRateLimits`
 
-```ts
-import { getRateLimitInfo } from '@commandkit/ratelimit';
+`resetAllRateLimits` supports several modes and requires storage delete helpers:
 
-export const chatInput = async (ctx) => {
-  const info = getRateLimitInfo(ctx);
-  if (info?.limited) {
-    console.log(info.retryAfter);
-  }
-};
-```
+| Mode | Required params | Storage requirement |
+| --- | --- | --- |
+| Pattern | `pattern` | `deleteByPattern` |
+| Prefix | `prefix` | `deleteByPrefix` |
+| Command name | `commandName` | `deleteByPattern` |
+| Scope | `scope` + required ids | `deleteByPrefix` |
 
-### Result shape
+### HMR reset behavior
 
-`RateLimitStoreValue` includes:
+When a command file is hot-reloaded, the plugin deletes keys that match:
 
-- `limited`: Whether any limiter hit.
-- `remaining`: Minimum remaining across all results.
-- `resetAt`: Latest reset timestamp across all results.
-- `retryAfter`: Max retry delay when limited.
-- `results`: Array of `RateLimitResult` entries.
+- `*:{commandName}`
+- `violation:*:{commandName}`
+- `*:{commandName}:w:*`
+- `violation:*:{commandName}:w:*`
 
-Each `RateLimitResult` includes:
-
-- `key`, `scope`, `algorithm`, `windowId?`.
-- `limited`, `remaining`, `resetAt`, `retryAfter`, `limit`.
-
-### Reset helpers
-
-```ts
-import { resetRateLimit, resetAllRateLimits } from '@commandkit/ratelimit';
-
-await resetRateLimit({ key: 'rl:user:USER_ID:ping' });
-
-await resetAllRateLimits({ commandName: 'ping' });
-
-await resetAllRateLimits({ scope: 'guild', guildId: 'GUILD_ID' });
-```
-
-Reset parameter notes:
-
-- `resetRateLimit` accepts either `key` or (`scope` + `commandName` + required IDs).
-- `resetAllRateLimits` accepts `pattern`, `prefix`, `commandName`, or `scope` + IDs.
-- `keyPrefix` can be passed to both reset helpers.
+HMR reset requires `deleteByPattern`. If the storage does not support pattern deletes, nothing is cleared.
 
 ## Directive: `use ratelimit`
 
-Use the directive in async functions to rate-limit function execution:
+The compiler plugin (`UseRateLimitDirectivePlugin`) uses `CommonDirectiveTransformer` with `directive = "use ratelimit"` and `importName = "$ckitirl"`. It transforms async functions only.
+
+The runtime wrapper:
+
+- Uses the runtime default limiter (merged with `DEFAULT_LIMITER`).
+- Generates a per-function key `rl:fn:{uuid}` and applies `keyPrefix` if present.
+- Aggregates results across windows and throws `RateLimitError` when limited.
+- Caches the wrapper per function and exposes it as `globalThis.$ckitirl`.
+
+Example:
 
 ```ts
 import { RateLimitError } from '@commandkit/ratelimit';
@@ -564,147 +741,61 @@ try {
 }
 ```
 
-The compiler plugin injects `$ckitirl` at build time. The runtime
-wrapper uses a per-function key and the runtime default limiter.
+## Defaults and edge cases
 
-The directive is applied only to async functions.
+### Defaults
 
-## RateLimitEngine reset
+| Setting | Default |
+| --- | --- |
+| `maxRequests` | `10` |
+| `interval` | `60s` |
+| `algorithm` | `fixed-window` |
+| `scope` | `user` |
+| `DEFAULT_KEY_PREFIX` | `rl:` |
+| `RATELIMIT_STORE_KEY` | `ratelimit` |
+| `roleLimitStrategy` | `highest` |
+| `queue.maxSize` | `3` |
+| `queue.timeout` | `30s` |
+| `queue.deferInteraction` | `true` |
+| `queue.ephemeral` | `true` |
+| `queue.concurrency` | `1` |
+| `initializeDefaultStorage` | `true` |
 
-`RateLimitEngine.reset(key)` removes both the main key and the
-`violation:{key}` entry.
+### Edge cases
 
-## HMR reset behavior
+1. If no storage is configured and default storage is disabled, the plugin logs once and stores an empty result without limiting.
+2. If no scope key can be resolved, the plugin stores an empty result and skips limiting.
+3. If storage errors occur during consume, `onStorageError` is invoked and the plugin skips limiting for that execution.
+4. For token and leaky buckets, `limit` equals `burst`. For fixed and sliding windows, `limit` equals `maxRequests`.
 
-When a command file is hot-reloaded, the runtime plugin clears that command's
-rate-limit keys using `deleteByPattern` (including `violation:` and `:w:` variants).
-If the storage does not support pattern deletes, nothing is cleared.
+## Duration parsing
 
-## Behavior details and edge cases
+`DurationLike` accepts numbers (milliseconds) or strings parsed by `ms`, plus custom units for weeks and months.
 
-- `ratelimit()` returns `[UseRateLimitDirectivePlugin, RateLimitPlugin]` in that order.
-- If required IDs are missing for a scope (for example no guild in DMs), that scope is skipped.
-- `interval` is clamped to at least 1ms when resolving limiter config.
-- `RateLimitResult.limit` is `burst` for token/leaky buckets and `maxRequests` for fixed/sliding windows.
-- Default rate-limit response uses an embed titled `:hourglass_flowing_sand: You are on cooldown` with a relative timestamp. Interactions reply ephemerally (or follow up if already replied/deferred). Non-repliable interactions are skipped. Messages reply only if the channel is sendable.
-- Queue behavior: queue size is pending + running; if `maxSize` is reached, the command is not queued and falls back to immediate rate-limit handling. Queued tasks stop after `timeout` and log a warning. After the initial delay, retries wait at least 250ms between checks. When queued, `ctx.capture()` and `onRateLimited`/`onViolation` hooks still run.
-- Bypass order is user/guild/role lists, then temporary exemptions, then `bypass.check`.
-- `roleLimitStrategy: 'first'` respects object insertion order. Role limits merge in this order: plugin `roleLimits` -> `defaultLimiter.roleLimits` -> named limiter `roleLimits` -> command overrides.
-- `resetRateLimit` triggers `hooks.onReset` for the key; `resetAllRateLimits` does not.
-- `onStorageError` is invoked with `fallbackUsed = false` from runtime plugin calls.
-- `grantRateLimitExemption` uses the runtime `keyPrefix` by default unless `keyPrefix` is provided.
-- `RateLimitError` defaults to message `Rate limit exceeded`.
-- If no storage is configured and default storage is disabled, the plugin logs once and stores an empty `RateLimitStoreValue` without limiting.
-- `FallbackRateLimitStorage` throws if either storage does not support an optional operation.
-- `MemoryRateLimitStorage.deleteByPattern` supports `*` wildcards (simple glob).
-
-## Constants
-
-- `RATELIMIT_STORE_KEY`: `ratelimit` (store key for aggregated results).
-- `DEFAULT_KEY_PREFIX`: `rl:` (prefix used in generated keys).
-
-## Type reference (exported)
-
-- `RateLimitScope` and `RATE_LIMIT_SCOPES`: Scope values used in keys.
-- `RateLimitExemptionScope` and `RATE_LIMIT_EXEMPTION_SCOPES`: Exemption scopes.
-- `RateLimitAlgorithmType` and `RATE_LIMIT_ALGORITHMS`: Algorithm identifiers.
-- `DurationLike`: Number in ms or duration string.
-- `RateLimitQueueOptions`: Queue settings for retries.
-- `RateLimitRoleLimitStrategy`: `highest`, `lowest`, or `first`.
-- `RateLimitResult`: Result for a single limiter/window.
-- `RateLimitAlgorithm`: Interface for algorithm implementations.
-- `FixedWindowConsumeResult` and `SlidingWindowConsumeResult`: Storage consume return types.
-- `RateLimitStorage` and `RateLimitStorageConfig`: Storage interface and wrapper.
-- `ViolationOptions`: Escalation controls.
-- `RateLimitWindowConfig`: Per-window limiter config.
-- `RateLimitKeyResolver`: Custom scope key resolver signature.
-- `RateLimitLimiterConfig`: Base limiter configuration.
-- `RateLimitCommandConfig`: Limiter config plus `limiter` name.
-- `RateLimitBypassOptions`: Bypass lists and optional `check`.
-- `RateLimitExemptionGrantParams`, `RateLimitExemptionRevokeParams`, `RateLimitExemptionListParams`: Exemption helper params.
-- `RateLimitExemptionInfo`: Exemption listing entry shape.
-- `RateLimitHookContext` and `RateLimitHooks`: Hook payloads and callbacks.
-- `RateLimitResponseHandler`: `onRateLimited` handler signature.
-- `RateLimitPluginOptions`: Runtime plugin options.
-- `RateLimitStoreValue`: Aggregated results stored in `env.store`.
-- `ResolvedLimiterConfig`: Resolved limiter config with defaults and `intervalMs`.
-- `RateLimitRuntimeContext`: Active runtime state.
+| Unit | Meaning |
+| --- | --- |
+| `ms`, `s`, `m`, `h`, `d` | Standard `ms` units. |
+| `w`, `week`, `weeks` | 7 days. |
+| `mo`, `month`, `months` | 30 days. |
 
 ## Exports
 
-- `ratelimit` plugin factory (compiler + runtime).
-- `RateLimitPlugin` and `UseRateLimitDirectivePlugin`.
-- `RateLimitEngine`, algorithm classes, and `ViolationTracker`.
-- Storage implementations: `MemoryRateLimitStorage`, `RedisRateLimitStorage`, `FallbackRateLimitStorage`.
-- Runtime helpers: `configureRatelimit`, `setRateLimitStorage`, `getRateLimitStorage`, `setDriver`, `getDriver`, `getRateLimitRuntime`, `setRateLimitRuntime`.
-- API helpers: `getRateLimitInfo`, `resetRateLimit`, `resetAllRateLimits`, `grantRateLimitExemption`, `revokeRateLimitExemption`, `listRateLimitExemptions`.
-- Errors: `RateLimitError`.
+| Export | Description |
+| --- | --- |
+| `ratelimit` | Plugin factory returning compiler + runtime plugins. |
+| `RateLimitPlugin` | Runtime plugin class. |
+| `UseRateLimitDirectivePlugin` | Compiler plugin for `use ratelimit`. |
+| `RateLimitEngine` | Algorithm coordinator with escalation handling. |
+| Algorithm classes | Fixed, sliding, token bucket, and leaky bucket implementations. |
+| Storage classes | Memory, Redis, and fallback storage. |
+| Runtime helpers | `configureRatelimit`, `setRateLimitStorage`, `getRateLimitRuntime`, and more. |
+| API helpers | `getRateLimitInfo`, resets, and exemption helpers. |
+| `RateLimitError` | Error thrown by the directive wrapper. |
 
-## Defaults
-
-- `maxRequests`: 10
-- `interval`: 60s
-- `algorithm`: `fixed-window`
-- `scope`: `user`
-- `keyPrefix`: none (but keys always include `rl:`)
-- `initializeDefaultStorage`: true
-
-## Duration units
-
-String durations support `ms`, `s`, `m`, `h`, `d` via `ms`, plus:
-
-- `w`, `week`, `weeks`
-- `mo`, `month`, `months`
-
-## Subpath exports
+Subpath exports:
 
 - `@commandkit/ratelimit/redis`
 - `@commandkit/ratelimit/memory`
 - `@commandkit/ratelimit/fallback`
 
-## Source map (packages/ratelimit/src)
 
-- `src/index.ts`: Package entrypoint that re-exports the public API.
-- `src/augmentation.ts`: Extends `CommandMetadata` with `metadata.ratelimit`.
-- `src/configure.ts`: `configureRatelimit`, `getRateLimitConfig`, `isRateLimitConfigured`, and runtime updates.
-- `src/runtime.ts`: Process-wide storage/runtime accessors, plus `setDriver`/`getDriver` aliases.
-- `src/plugin.ts`: Runtime plugin: config resolution, queueing, hooks, analytics/events, responses, and HMR resets.
-- `src/directive/use-ratelimit-directive.ts`: Compiler plugin for the `"use ratelimit"` directive.
-- `src/directive/use-ratelimit.ts`: Runtime directive wrapper; uses `RateLimitEngine` and throws `RateLimitError`.
-- `src/api.ts`: Public helpers for `getRateLimitInfo`, resets, and exemptions, plus param types.
-- `src/types.ts`: Public config/result/storage types.
-- `src/constants.ts`: `RATELIMIT_STORE_KEY` and `DEFAULT_KEY_PREFIX`.
-- `src/errors.ts`: `RateLimitError` type.
-- `src/engine/RateLimitEngine.ts`: Algorithm selection plus violation escalation.
-- `src/engine/violations.ts`: `ViolationTracker` and escalation state.
-- `src/engine/algorithms/fixed-window.ts`: Fixed-window algorithm.
-- `src/engine/algorithms/sliding-window.ts`: Sliding-window log algorithm.
-- `src/engine/algorithms/token-bucket.ts`: Token-bucket algorithm.
-- `src/engine/algorithms/leaky-bucket.ts`: Leaky-bucket algorithm.
-- `src/storage/memory.ts`: In-memory storage with TTL and sorted-set helpers.
-- `src/storage/redis.ts`: Redis storage with Lua scripts for atomic windows.
-- `src/storage/fallback.ts`: Fallback storage wrapper with cooldown logging.
-- `src/providers/memory.ts`: Subpath export for memory storage.
-- `src/providers/redis.ts`: Subpath export for Redis storage.
-- `src/providers/fallback.ts`: Subpath export for fallback storage.
-- `src/utils/config.ts`: Defaults, normalization, multi-window resolution, and role-limit merging.
-- `src/utils/keys.ts`: Key building and parsing for scopes/exemptions.
-- `src/utils/time.ts`: Duration parsing and clamp helpers.
-- `src/utils/locking.ts`: Per-storage keyed mutex for fallback algorithm serialization.
-
-## Spec map (packages/ratelimit/spec)
-
-- `spec/setup.ts`: Shared test setup for vitest.
-- `spec/helpers.ts`: Test helpers and stubs.
-- `spec/algorithms.test.ts`: Algorithm integration tests.
-- `spec/engine.test.ts`: Engine + violation behavior tests.
-- `spec/api.test.ts`: API helper tests (resets, exemptions, info).
-- `spec/plugin.test.ts`: Runtime plugin behavior tests.
-
-## Manual testing
-
-- Configure `maxRequests: 1` and `interval: '5s'`.
-- Call the command twice and verify the cooldown response.
-- Enable queue mode and confirm the second call is deferred and executes later.
-- Grant an exemption and verify the user bypasses limits.
-- Reset the command and verify the cooldown clears immediately.

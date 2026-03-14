@@ -13,7 +13,7 @@ import MemberDescription from '@site/src/components/MemberDescription';
 
 ## FixedWindowAlgorithm
 
-<GenerationInfo sourceFile="packages/ratelimit/src/engine/algorithms/fixed-window.ts" sourceLine="29" packageName="@commandkit/ratelimit" />
+<GenerationInfo sourceFile="packages/ratelimit/src/engine/algorithms/fixed-window.ts" sourceLine="33" packageName="@commandkit/ratelimit" />
 
 Basic fixed-window counter for low-cost rate limits.
 
@@ -40,7 +40,7 @@ class FixedWindowAlgorithm implements RateLimitAlgorithm {
 
 <MemberInfo kind="method" type={`(storage: <a href='/docs/api-reference/ratelimit/interfaces/rate-limit-storage#ratelimitstorage'>RateLimitStorage</a>, config: FixedWindowConfig) => FixedWindowAlgorithm`}   />
 
-
+Create a fixed-window algorithm bound to a storage backend.
 ### consume
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;<a href='/docs/api-reference/ratelimit/interfaces/rate-limit-result#ratelimitresult'>RateLimitResult</a>&#62;`}   />
@@ -50,7 +50,7 @@ Record one attempt and return the current window status for this key.
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;void&#62;`}   />
 
-
+Reset the stored key state for this limiter.
 
 
 </div>

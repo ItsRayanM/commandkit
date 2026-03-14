@@ -13,7 +13,7 @@ import MemberDescription from '@site/src/components/MemberDescription';
 
 ## LeakyBucketAlgorithm
 
-<GenerationInfo sourceFile="packages/ratelimit/src/engine/algorithms/leaky-bucket.ts" sourceLine="30" packageName="@commandkit/ratelimit" />
+<GenerationInfo sourceFile="packages/ratelimit/src/engine/algorithms/leaky-bucket.ts" sourceLine="34" packageName="@commandkit/ratelimit" />
 
 Leaky bucket algorithm for smoothing output to a steady rate.
 
@@ -40,7 +40,7 @@ class LeakyBucketAlgorithm implements RateLimitAlgorithm {
 
 <MemberInfo kind="method" type={`(storage: <a href='/docs/api-reference/ratelimit/interfaces/rate-limit-storage#ratelimitstorage'>RateLimitStorage</a>, config: LeakyBucketConfig) => LeakyBucketAlgorithm`}   />
 
-
+Create a leaky-bucket algorithm bound to a storage backend.
 ### consume
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;<a href='/docs/api-reference/ratelimit/interfaces/rate-limit-result#ratelimitresult'>RateLimitResult</a>&#62;`}   />
@@ -50,7 +50,7 @@ Record one attempt and return the current bucket status for this key.
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;void&#62;`}   />
 
-
+Reset the stored key state for this limiter.
 
 
 </div>

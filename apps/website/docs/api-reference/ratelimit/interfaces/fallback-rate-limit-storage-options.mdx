@@ -13,7 +13,7 @@ import MemberDescription from '@site/src/components/MemberDescription';
 
 ## FallbackRateLimitStorageOptions
 
-<GenerationInfo sourceFile="packages/ratelimit/src/storage/fallback.ts" sourceLine="11" packageName="@commandkit/ratelimit" />
+<GenerationInfo sourceFile="packages/ratelimit/src/storage/fallback.ts" sourceLine="13" packageName="@commandkit/ratelimit" />
 
 Options that control fallback logging/cooldown behavior.
 
@@ -27,7 +27,7 @@ interface FallbackRateLimitStorageOptions {
 
 ### cooldownMs
 
-<MemberInfo kind="property" type={`number`}   />
+<MemberInfo kind="property" type={`number`} default={`30000`}   />
 
 Minimum time between fallback log entries (to avoid log spam).
 

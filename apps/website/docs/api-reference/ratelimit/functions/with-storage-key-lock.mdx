@@ -13,9 +13,9 @@ import MemberDescription from '@site/src/components/MemberDescription';
 
 ## withStorageKeyLock
 
-<GenerationInfo sourceFile="packages/ratelimit/src/utils/locking.ts" sourceLine="31" packageName="@commandkit/ratelimit" />
+<GenerationInfo sourceFile="packages/ratelimit/src/utils/locking.ts" sourceLine="55" packageName="@commandkit/ratelimit" />
 
-
+Serialize work for a storage key to avoid same-process conflicts.
 
 ```ts title="Signature"
 function withStorageKeyLock<T>(storage: RateLimitStorage, key: string, fn: LockedFn<T>): Promise<T>

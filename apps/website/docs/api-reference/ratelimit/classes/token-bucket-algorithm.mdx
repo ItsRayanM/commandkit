@@ -13,7 +13,7 @@ import MemberDescription from '@site/src/components/MemberDescription';
 
 ## TokenBucketAlgorithm
 
-<GenerationInfo sourceFile="packages/ratelimit/src/engine/algorithms/token-bucket.ts" sourceLine="30" packageName="@commandkit/ratelimit" />
+<GenerationInfo sourceFile="packages/ratelimit/src/engine/algorithms/token-bucket.ts" sourceLine="34" packageName="@commandkit/ratelimit" />
 
 Token bucket algorithm for bursty traffic with steady refill.
 
@@ -40,7 +40,7 @@ class TokenBucketAlgorithm implements RateLimitAlgorithm {
 
 <MemberInfo kind="method" type={`(storage: <a href='/docs/api-reference/ratelimit/interfaces/rate-limit-storage#ratelimitstorage'>RateLimitStorage</a>, config: <a href='/docs/api-reference/ratelimit/interfaces/token-bucket-config#tokenbucketconfig'>TokenBucketConfig</a>) => TokenBucketAlgorithm`}   />
 
-
+Create a token-bucket algorithm bound to a storage backend.
 ### consume
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;<a href='/docs/api-reference/ratelimit/interfaces/rate-limit-result#ratelimitresult'>RateLimitResult</a>&#62;`}   />
@@ -50,7 +50,7 @@ Record one attempt and return the current bucket status for this key.
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;void&#62;`}   />
 
-
+Reset the stored key state for this limiter.
 
 
 </div>

@@ -13,7 +13,7 @@ import MemberDescription from '@site/src/components/MemberDescription';
 
 ## ViolationTracker
 
-<GenerationInfo sourceFile="packages/ratelimit/src/engine/violations.ts" sourceLine="21" packageName="@commandkit/ratelimit" />
+<GenerationInfo sourceFile="packages/ratelimit/src/engine/violations.ts" sourceLine="23" packageName="@commandkit/ratelimit" />
 
 Tracks repeated violations and computes escalating cooldowns.
 
@@ -33,7 +33,7 @@ class ViolationTracker {
 
 <MemberInfo kind="method" type={`(storage: <a href='/docs/api-reference/ratelimit/interfaces/rate-limit-storage#ratelimitstorage'>RateLimitStorage</a>) => ViolationTracker`}   />
 
-
+Create a violation tracker bound to a storage backend.
 ### getState
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;ViolationState | null&#62;`}   />
@@ -53,7 +53,7 @@ Record a violation and return the updated state for callers.
 
 <MemberInfo kind="method" type={`(key: string) => Promise&#60;void&#62;`}   />
 
-
+Clear stored violation state for a key.
 
 
 </div>
